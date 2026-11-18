@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WebNetworkOrganizer</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <h1>WebNetworkOrganizer</h1>
+    <div class="topbar-controls">
+      <button id="add-container-btn" class="btn primary" data-i18n="addContainer">Add container</button>
+      <button id="settings-btn" class="btn icon" title="Settings" aria-label="Settings">
+        <svg viewBox="0 0 16 16" aria-hidden="true">
+          <path d="M9.405 1.05c-.413-1.4-2.397-1.4-2.81 0l-.1.34a1.464 1.464 0 0 1-2.105.872l-.31-.17c-1.283-.698-2.686.705-1.987 1.987l.169.311c.446.82.023 1.841-.872 2.105l-.34.1c-1.4.413-1.4 2.397 0 2.81l.34.1a1.464 1.464 0 0 1 .872 2.105l-.17.31c-.698 1.283.705 2.686 1.987 1.987l.311-.169a1.464 1.464 0 0 1 2.105.872l.1.34c.413 1.4 2.397 1.4 2.81 0l.1-.34a1.464 1.464 0 0 1 2.105-.872l.31.17c1.283.698 2.686-.705 1.987-1.987l-.169-.311a1.464 1.464 0 0 1 .872-2.105l.34-.1c1.4-.413 1.4-2.397 0-2.81l-.34-.1a1.464 1.464 0 0 1-.872-2.105l.17-.31c.698-1.283-.705-2.686-1.987-1.987l-.311.169a1.464 1.464 0 0 1-2.105-.872l-.1-.34ZM8 10.93a2.929 2.929 0 1 1 0-5.86 2.929 2.929 0 0 1 0 5.858Z"/>
+        </svg>
+      </button>
+    </div>
+  </header>
+
+  <main class="content">
+    <div id="containers" class="containers"></div>
+  </main>
+
+  <footer>WebNetworkOrganizer</footer>
+
+  <div id="container-overlay" class="overlay hidden">
+    <div class="modal">
+      <h2 id="container-modal-title"></h2>
+      <button type="button" id="container-close" class="btn icon modal-close" data-i18n-title="close" title="Close">
+        <svg viewBox="0 0 16 16" aria-hidden="true">
+          <path d="M3.72 3.72a.75.75 0 0 1 1.06 0L8 6.94l3.22-3.22a.75.75 0 1 1 1.06 1.06L9.06 8l3.22 3.22a.75.75 0 1 1-1.06 1.06L8 9.06l-3.22 3.22a.75.75 0 0 1-1.06-1.06L6.94 8 3.72 4.78a.75.75 0 0 1 0-1.06Z"/>
+        </svg>
+      </button>
+      <form id="container-form">
+        <div class="field">
+          <label for="container-name" data-i18n="containerNameLabel">Container name</label>
+          <input id="container-name" type="text" maxlength="100" required>
+        </div>
+        <div id="container-error" class="error"></div>
+        <div class="modal-actions">
+          <button type="submit" id="container-modal-submit" class="btn primary"></button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="host-overlay" class="overlay hidden">
+    <div class="modal">
+      <h2 data-i18n="addHost">Add host</h2>
+      <button type="button" id="host-close" class="btn icon modal-close" data-i18n-title="close" title="Close">
+        <svg viewBox="0 0 16 16" aria-hidden="true">
+          <path d="M3.72 3.72a.75.75 0 0 1 1.06 0L8 6.94l3.22-3.22a.75.75 0 1 1 1.06 1.06L9.06 8l3.22 3.22a.75.75 0 1 1-1.06 1.06L8 9.06l-3.22 3.22a.75.75 0 0 1-1.06-1.06L6.94 8 3.72 4.78a.75.75 0 0 1 0-1.06Z"/>
+        </svg>
+      </button>
+      <form id="host-form">
+        <div class="field">
+          <label for="host-name" data-i18n="hostNameLabel">Host name</label>
+          <input id="host-name" type="text" maxlength="100" required>
+        </div>
+        <div class="field">
+          <label for="host-address" data-i18n="hostAddressLabel">Host address</label>
+          <input id="host-address" type="text" maxlength="255" placeholder="192.168.1.10" required>
+        </div>
+        <div class="field">
+          <label for="host-os" data-i18n="osLabel">Operating system</label>
+          <select id="host-os">
+            <option value="linux">Linux</option>
+          </select>
+        </div>
+        <div id="host-error" class="error"></div>
+        <div class="modal-actions">
+          <button type="submit" class="btn primary" data-i18n="create">Create</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="host-settings-overlay" class="overlay hidden">
+    <div class="modal settings-modal">
+      <button type="button" id="host-settings-close" class="btn icon modal-close" data-i18n-title="close" title="Close">
+        <svg viewBox="0 0 16 16" aria-hidden="true">
+          <path d="M3.72 3.72a.75.75 0 0 1 1.06 0L8 6.94l3.22-3.22a.75.75 0 1 1 1.06 1.06L9.06 8l3.22 3.22a.75.75 0 1 1-1.06 1.06L8 9.06l-3.22 3.22a.75.75 0 0 1-1.06-1.06L6.94 8 3.72 4.78a.75.75 0 0 1 0-1.06Z"/>
+        </svg>
+      </button>
+      <aside class="settings-nav">
+        <nav>
+          <a href="#" class="settings-nav-item active" data-section="general" data-i18n="general">General</a>
+        </nav>
+      </aside>
+      <section class="settings-content">
+        <div id="settings-section-general" class="settings-section">
+          <h2 data-i18n="general">General</h2>
+          <div class="field">
+            <label for="host-settings-name" data-i18n="hostNameLabel">Host name</label>
+            <input id="host-settings-name" type="text" maxlength="100">
+          </div>
+          <div class="field">
+            <label for="host-settings-address" data-i18n="hostAddressLabel">Host address</label>
+            <input id="host-settings-address" type="text" maxlength="255">
+          </div>
+          <div id="host-settings-error" class="error"></div>
+          <div class="modal-actions">
+            <button type="button" id="host-settings-save" class="btn primary" data-i18n="save">Save</button>
+          </div>
+          <div id="host-settings-status" class="settings-status"></div>
+          <div class="danger-zone">
+            <h4 data-i18n="dangerZone">Danger zone</h4>
+            <button type="button" id="host-delete-btn" class="btn danger" data-i18n="deleteHost">Delete host</button>
+          </div>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <div id="settings-overlay" class="overlay hidden">
+    <div class="modal settings-modal">
+      <button type="button" id="settings-close" class="btn icon modal-close" data-i18n-title="close" title="Close">
+        <svg viewBox="0 0 16 16" aria-hidden="true">
+          <path d="M3.72 3.72a.75.75 0 0 1 1.06 0L8 6.94l3.22-3.22a.75.75 0 1 1 1.06 1.06L9.06 8l3.22 3.22a.75.75 0 1 1-1.06 1.06L8 9.06l-3.22 3.22a.75.75 0 0 1-1.06-1.06L6.94 8 3.72 4.78a.75.75 0 0 1 0-1.06Z"/>
+        </svg>
+      </button>
+      <aside class="settings-nav">
+        <nav>
+          <a href="#" class="settings-nav-item active" data-section="appearance" data-i18n="appearance">Appearance</a>
+        </nav>
+      </aside>
+      <section class="settings-content">
+        <div id="settings-section-appearance" class="settings-section">
+          <h2 data-i18n="appearance">Appearance</h2>
+          <div class="field">
+            <label for="theme-select" data-i18n="themeLabel">Theme</label>
+            <select id="theme-select">
+              <option value="dark" data-i18n="themeDark">Dark</option>
+              <option value="light" data-i18n="themeLight">Light</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="language-select" data-i18n="languageLabel">Language</label>
+            <select id="language-select">
+              <option value="en">English</option>
+              <option value="ru">Русский</option>
+            </select>
+          </div>
+          <div id="settings-status" class="settings-status"></div>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <script src="/js/icons.js"></script>
+  <script src="/js/utils.js"></script>
+  <script src="/js/i18n.js"></script>
+  <script src="/js/api.js"></script>
+  <script src="/js/hosts.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>
