@@ -4,10 +4,6 @@ function getOpenPanel(hostId) {
   return state.hostPanels[hostId] || null;
 }
 
-function hasOpenPanels() {
-  return Object.keys(state.hostPanels).length > 0;
-}
-
 function hostSectionHtml(titleKey, emptyKey) {
   return `
     <div class="host-section">
@@ -173,20 +169,34 @@ async function deleteHostFlow() {
   }
 }
 
+function setPanelState(hostId, panelId) {
+  const card = document.querySelector(`.host-card[data-host-id="${hostId}"]`);
+  if (!card) {
+    return;
+  }
+  card.querySelectorAll(".host-panel").forEach((panel) => {
+    panel.classList.toggle("open", panel.dataset.panelBody === panelId);
+  });
+  card.querySelectorAll(".host-tab").forEach((tab) => {
+    tab.classList.toggle("active", tab.dataset.panel === panelId);
+  });
+}
+
 function toggleHostPanel(hostId, panel) {
   if (state.hostPanels[hostId] === panel) {
     delete state.hostPanels[hostId];
   } else {
     state.hostPanels[hostId] = panel;
   }
-  renderContainers();
+  setPanelState(hostId, state.hostPanels[hostId] || null);
 }
 
 function closeHostPanel(hostId, panel) {
-  if (state.hostPanels[hostId] === panel) {
-    delete state.hostPanels[hostId];
-    renderContainers();
+  if (state.hostPanels[hostId] !== panel) {
+    return;
   }
+  delete state.hostPanels[hostId];
+  setPanelState(hostId, null);
 }
 
 function initHosts() {

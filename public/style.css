@@ -9,6 +9,10 @@
   --accent: #2f81f7;
   --accent-hover: #388bfd;
   --gray: #57606a;
+  --docker: #2496ed;
+  --docker-bg: rgba(36, 150, 237, 0.14);
+  --docker-border: rgba(36, 150, 237, 0.5);
+  --panel-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
 }
 
 [data-theme="light"] {
@@ -21,6 +25,10 @@
   --accent: #0969da;
   --accent-hover: #0550ae;
   --gray: #8c959f;
+  --docker: #1d63ed;
+  --docker-bg: rgba(29, 99, 237, 0.1);
+  --docker-border: rgba(29, 99, 237, 0.45);
+  --panel-shadow: 0 8px 24px rgba(0, 0, 0, 0.14);
 }
 
 * {
@@ -101,17 +109,11 @@ body {
 
 .hosts {
   display: flex;
-  flex-direction: row;
+  flex-wrap: wrap;
   align-items: flex-start;
   justify-content: flex-start;
   gap: 12px;
-  overflow-x: auto;
-  padding-bottom: 4px;
   margin-top: 12px;
-}
-
-.hosts.panel-open {
-  overflow: visible;
 }
 
 .hosts-empty {
@@ -185,7 +187,7 @@ body {
 
 .os-icon svg {
   width: 28px;
-  height: 28px;
+  height: 32px;
 }
 
 .host-actions {
@@ -278,27 +280,61 @@ body {
   color: var(--text);
 }
 
+.host-tab[data-panel="docker"]:hover {
+  background: var(--docker-bg);
+  color: var(--docker);
+}
+
 .host-tab.active {
   color: var(--accent);
   border-color: var(--accent);
   background: var(--card);
 }
 
+.host-tab[data-panel="docker"].active {
+  color: var(--docker);
+  border-color: var(--docker);
+  background: var(--docker-bg);
+  box-shadow: 0 0 8px var(--docker-bg);
+}
+
 .host-panel {
   position: absolute;
   left: 100%;
-  top: 0;
+  top: 6px;
+  bottom: 6px;
   width: min(50%, 420px);
+  display: flex;
+  flex-direction: column;
   background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 0 8px 8px 0;
+  box-shadow: var(--panel-shadow);
   z-index: 20;
-  display: none;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transform: translateX(-20px);
+  transition: opacity 0.2s ease, transform 0.2s ease, visibility 0.2s;
 }
 
 .host-panel.open {
-  display: flex;
-  flex-direction: column;
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transform: translateX(0);
+}
+
+.host-panel[data-panel-body="docker"] {
+  border-color: var(--docker-border);
+}
+
+.host-panel[data-panel-body="docker"] .host-panel-icon {
+  color: var(--docker);
+}
+
+.host-panel[data-panel-body="docker"] .host-panel-header {
+  border-bottom-color: var(--docker-border);
 }
 
 .host-panel-header {
@@ -330,10 +366,12 @@ body {
 }
 
 .host-panel-body {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
   padding: 12px;
   font-size: 13px;
   color: var(--muted);
-  min-height: 120px;
 }
 
 .empty {

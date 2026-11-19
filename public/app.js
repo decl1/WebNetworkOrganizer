@@ -92,7 +92,6 @@ function renderContainers() {
     containerEl.innerHTML = `<div class="empty"><p>${t("emptyContainers")}</p></div>`;
     return;
   }
-  const hostsClass = hasOpenPanels() ? " panel-open" : "";
   containerEl.innerHTML = state.containers
     .map(
       (container) => `
@@ -104,7 +103,7 @@ function renderContainers() {
             <button class="btn icon danger-box" data-action="delete-container" data-i18n-title="delete" title="${t("delete")}">${ICONS.trash}</button>
           </div>
         </div>
-        <div class="hosts${hostsClass}">
+        <div class="hosts">
           ${container.hosts.length === 0 ? `<div class="hosts-empty">${t("emptyHosts")}</div>` : ""}
           ${container.hosts.map(hostCardHtml).join("")}
           <div class="add-card">
