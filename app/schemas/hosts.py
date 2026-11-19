@@ -9,10 +9,20 @@ class OS(str, Enum):
     LINUX = "linux"
 
 
+class SSHAuth(str, Enum):
+    KEY = "key"
+    PASSWORD = "password"
+
+
 class HostIn(BaseModel):
     name: str = Field(max_length=100)
     address: str = Field(max_length=255)
     os: OS = OS.LINUX
+    auto_refresh: int = Field(default=0, ge=0, le=86400)
+    ssh_auth: SSHAuth = SSHAuth.KEY
+    ssh_user: str = Field(default="", max_length=100)
+    ssh_port: int = Field(default=22, ge=1, le=65535)
+    ssh_password: str = Field(default="", max_length=500)
 
     @field_validator("name")
     @classmethod
@@ -30,6 +40,16 @@ class HostIn(BaseModel):
             raise ValueError("Host address cannot be empty")
         return address
 
+    @field_validator("ssh_user")
+    @classmethod
+    def _normalize_ssh_user(cls, value: str) -> str:
+        return value.strip()
+
+    @field_validator("ssh_password")
+    @classmethod
+    def _normalize_ssh_password(cls, value: str) -> str:
+        return value.strip()
+
 
 class HostPatch(BaseModel):
     """Partial host update: only the provided fields are changed."""
@@ -37,6 +57,41 @@ class HostPatch(BaseModel):
     name: str | None = Field(default=None, max_length=100)
     address: str | None = Field(default=None, max_length=255)
     os: OS | None = None
+    auto_refresh: int | None = Field(default=None, ge=0, le=86400)
+    ssh_auth: SSHAuth | None = None
+    ssh_user: str | None = Field(default=None, max_length=100)
+    ssh_port: int | None = Field(default=None, ge=1, le=65535)
+    ssh_password: str | None = Field(default=None, max_length=500)
+
+    @field_validator("name")
+    @classmethod
+    def _normalize_name(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        name = value.strip()
+        if not name:
+            raise ValueError("Host name cannot be empty")
+        return name
+
+    @field_validator("address")
+    @classmethod
+    def _normalize_address(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        address = value.strip()
+        if not address:
+            raise ValueError("Host address cannot be empty")
+        return address
+
+    @field_validator("ssh_user")
+    @classmethod
+    def _normalize_ssh_user(cls, value: str | None) -> str | None:
+        return value.strip() if value is not None else None
+
+    @field_validator("ssh_password")
+    @classmethod
+    def _normalize_ssh_password(cls, value: str | None) -> str | None:
+        return value.strip() if value is not None else None
 
     @field_validator("name")
     @classmethod
@@ -65,4 +120,23 @@ class HostOut(BaseModel):
     name: str
     address: str
     os: OS
+    auto_refresh: int = 0
+    ping_status: str = "unknown"
+    ping_at: str | None = None
+    ping_ms: float | None = None
+    ssh_auth: SSHAuth = SSHAuth.KEY
+    ssh_user: str = ""
+    ssh_port: int = 22
+    ssh_password: str = ""
+    ssh_status: str = "unknown"
+    ssh_at: str | None = None
+    ssh_error: str | None = None
     created_at: str
+
+
+class LogOut(BaseModel):
+    id: int
+    host_id: int
+    ts: str
+    level: str
+    message: str

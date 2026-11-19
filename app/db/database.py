@@ -24,7 +24,26 @@ CREATE TABLE IF NOT EXISTS hosts (
     name TEXT NOT NULL,
     address TEXT NOT NULL DEFAULT '',
     os TEXT NOT NULL DEFAULT 'linux',
+    auto_refresh INTEGER NOT NULL DEFAULT 0,
+    ping_status TEXT NOT NULL DEFAULT 'unknown',
+    ping_at TEXT,
+    ping_ms REAL,
+    ssh_auth TEXT NOT NULL DEFAULT 'key',
+    ssh_user TEXT NOT NULL DEFAULT '',
+    ssh_port INTEGER NOT NULL DEFAULT 22,
+    ssh_password TEXT NOT NULL DEFAULT '',
+    ssh_status TEXT NOT NULL DEFAULT 'unknown',
+    ssh_at TEXT,
+    ssh_error TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS host_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    host_id INTEGER NOT NULL REFERENCES hosts(id) ON DELETE CASCADE,
+    ts TEXT NOT NULL DEFAULT (datetime('now')),
+    level TEXT NOT NULL DEFAULT 'info',
+    message TEXT NOT NULL
 );
 """
 
@@ -33,6 +52,61 @@ _MIGRATIONS = [
         "hosts",
         "address",
         "ALTER TABLE hosts ADD COLUMN address TEXT NOT NULL DEFAULT ''",
+    ),
+    (
+        "hosts",
+        "auto_refresh",
+        "ALTER TABLE hosts ADD COLUMN auto_refresh INTEGER NOT NULL DEFAULT 0",
+    ),
+    (
+        "hosts",
+        "ping_status",
+        "ALTER TABLE hosts ADD COLUMN ping_status TEXT NOT NULL DEFAULT 'unknown'",
+    ),
+    (
+        "hosts",
+        "ping_at",
+        "ALTER TABLE hosts ADD COLUMN ping_at TEXT",
+    ),
+    (
+        "hosts",
+        "ping_ms",
+        "ALTER TABLE hosts ADD COLUMN ping_ms REAL",
+    ),
+    (
+        "hosts",
+        "ssh_auth",
+        "ALTER TABLE hosts ADD COLUMN ssh_auth TEXT NOT NULL DEFAULT 'key'",
+    ),
+    (
+        "hosts",
+        "ssh_user",
+        "ALTER TABLE hosts ADD COLUMN ssh_user TEXT NOT NULL DEFAULT ''",
+    ),
+    (
+        "hosts",
+        "ssh_port",
+        "ALTER TABLE hosts ADD COLUMN ssh_port INTEGER NOT NULL DEFAULT 22",
+    ),
+    (
+        "hosts",
+        "ssh_password",
+        "ALTER TABLE hosts ADD COLUMN ssh_password TEXT NOT NULL DEFAULT ''",
+    ),
+    (
+        "hosts",
+        "ssh_status",
+        "ALTER TABLE hosts ADD COLUMN ssh_status TEXT NOT NULL DEFAULT 'unknown'",
+    ),
+    (
+        "hosts",
+        "ssh_at",
+        "ALTER TABLE hosts ADD COLUMN ssh_at TEXT",
+    ),
+    (
+        "hosts",
+        "ssh_error",
+        "ALTER TABLE hosts ADD COLUMN ssh_error TEXT",
     ),
 ]
 

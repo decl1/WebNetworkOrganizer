@@ -4,8 +4,30 @@ from typing import Any
 
 from .database import connect
 
-_COLUMNS = ("id", "container_id", "name", "address", "os", "created_at")
-_SELECT = "SELECT id, container_id, name, address, os, created_at FROM hosts"
+_COLUMNS = (
+    "id",
+    "container_id",
+    "name",
+    "address",
+    "os",
+    "auto_refresh",
+    "ping_status",
+    "ping_at",
+    "ping_ms",
+    "ssh_auth",
+    "ssh_user",
+    "ssh_port",
+    "ssh_password",
+    "ssh_status",
+    "ssh_at",
+    "ssh_error",
+    "created_at",
+)
+_SELECT = (
+    "SELECT id, container_id, name, address, os, auto_refresh, ping_status, ping_at, ping_ms, "
+    "ssh_auth, ssh_user, ssh_port, ssh_password, ssh_status, ssh_at, ssh_error, created_at "
+    "FROM hosts"
+)
 
 
 class ContainerNotFoundError(Exception):
@@ -26,15 +48,26 @@ def get_host(host_id: int) -> dict[str, Any] | None:
     return dict(row) if row is not None else None
 
 
-def create_host(container_id: int, name: str, address: str, os: str) -> dict[str, Any]:
+def create_host(
+    container_id: int,
+    name: str,
+    address: str,
+    os: str,
+    auto_refresh: int = 0,
+    ssh_auth: str = "key",
+    ssh_user: str = "",
+    ssh_port: int = 22,
+    ssh_password: str = "",
+) -> dict[str, Any]:
     """Create a host in a container and return it."""
     with connect() as conn:
         container = conn.execute("SELECT id FROM containers WHERE id = ?", (container_id,)).fetchone()
         if container is None:
             raise ContainerNotFoundError
         cursor = conn.execute(
-            "INSERT INTO hosts (container_id, name, address, os) VALUES (?, ?, ?, ?)",
-            (container_id, name, address, os),
+            "INSERT INTO hosts (container_id, name, address, os, auto_refresh, ssh_auth, ssh_user, ssh_port, ssh_password) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (container_id, name, address, os, auto_refresh, ssh_auth, ssh_user, ssh_port, ssh_password),
         )
         row = conn.execute(_SELECT + " WHERE id = ?", (cursor.lastrowid,)).fetchone()
     if row is None:
@@ -47,6 +80,11 @@ def update_host(
     name: str | None = None,
     address: str | None = None,
     os: str | None = None,
+    auto_refresh: int | None = None,
+    ssh_auth: str | None = None,
+    ssh_user: str | None = None,
+    ssh_port: int | None = None,
+    ssh_password: str | None = None,
 ) -> dict[str, Any] | None:
     """Update a host's fields and return it, or None if it does not exist."""
     with connect() as conn:
@@ -60,11 +98,50 @@ def update_host(
             current["address"] = address
         if os is not None:
             current["os"] = os
+        if auto_refresh is not None:
+            current["auto_refresh"] = auto_refresh
+        if ssh_auth is not None:
+            current["ssh_auth"] = ssh_auth
+        if ssh_user is not None:
+            current["ssh_user"] = ssh_user
+        if ssh_port is not None:
+            current["ssh_port"] = ssh_port
+        if ssh_password is not None:
+            current["ssh_password"] = ssh_password
         conn.execute(
-            "UPDATE hosts SET name = ?, address = ?, os = ? WHERE id = ?",
-            (current["name"], current["address"], current["os"], host_id),
+            "UPDATE hosts SET name = ?, address = ?, os = ?, auto_refresh = ?, ssh_auth = ?, ssh_user = ?, "
+            "ssh_port = ?, ssh_password = ? WHERE id = ?",
+            (
+                current["name"],
+                current["address"],
+                current["os"],
+                current["auto_refresh"],
+                current["ssh_auth"],
+                current["ssh_user"],
+                current["ssh_port"],
+                current["ssh_password"],
+                host_id,
+            ),
         )
     return current
+
+
+def set_ssh_result(host_id: int, status: str, error: str | None, ssh_at: str | None) -> None:
+    """Store the result of the latest SSH connectivity check for a host."""
+    with connect() as conn:
+        conn.execute(
+            "UPDATE hosts SET ssh_status = ?, ssh_error = ?, ssh_at = ? WHERE id = ?",
+            (status, error, ssh_at, host_id),
+        )
+
+
+def set_ping_result(host_id: int, status: str, ms: float | None, ping_at: str | None) -> None:
+    """Store the result of the latest ping check for a host."""
+    with connect() as conn:
+        conn.execute(
+            "UPDATE hosts SET ping_status = ?, ping_ms = ?, ping_at = ? WHERE id = ?",
+            (status, ms, ping_at, host_id),
+        )
 
 
 def delete_host(host_id: int) -> bool:

@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>WebNetworkOrganizer</title>
   <link rel="stylesheet" href="/style.css">
+  <link rel="stylesheet" href="/vendor/xterm.css">
 </head>
 <body>
   <header class="topbar">
@@ -23,7 +24,7 @@
     <div id="containers" class="containers"></div>
   </main>
 
-  <footer>WebNetworkOrganizer</footer>
+  <footer id="taskbar"></footer>
 
   <div id="container-overlay" class="overlay hidden">
     <div class="modal">
@@ -87,6 +88,7 @@
       <aside class="settings-nav">
         <nav>
           <a href="#" class="settings-nav-item active" data-section="general" data-i18n="general">General</a>
+          <a href="#" class="settings-nav-item" data-section="ssh" data-i18n="ssh">SSH</a>
         </nav>
       </aside>
       <section class="settings-content">
@@ -100,15 +102,49 @@
             <label for="host-settings-address" data-i18n="hostAddressLabel">Host address</label>
             <input id="host-settings-address" type="text" maxlength="255">
           </div>
-          <div id="host-settings-error" class="error"></div>
-          <div class="modal-actions">
-            <button type="button" id="host-settings-save" class="btn primary" data-i18n="save">Save</button>
+          <div class="field">
+            <label for="host-settings-auto-refresh" data-i18n="autoRefreshLabel">Auto-refresh interval, sec</label>
+            <input id="host-settings-auto-refresh" type="number" min="0" max="86400" step="1" value="0">
+            <span class="field-hint" data-i18n="autoRefreshHint">0 — disabled</span>
           </div>
-          <div id="host-settings-status" class="settings-status"></div>
-          <div class="danger-zone">
-            <h4 data-i18n="dangerZone">Danger zone</h4>
-            <button type="button" id="host-delete-btn" class="btn danger" data-i18n="deleteHost">Delete host</button>
+        </div>
+        <div id="settings-section-ssh" class="settings-section" style="display: none;">
+          <h2 data-i18n="ssh">SSH</h2>
+          <div class="field">
+            <label for="host-settings-ssh-auth" data-i18n="sshAuth">Authentication</label>
+            <select id="host-settings-ssh-auth">
+              <option value="key" data-i18n="authKey">SSH key</option>
+              <option value="password" data-i18n="authPassword">Password</option>
+            </select>
           </div>
+          <div class="field">
+            <label for="host-settings-ssh-user" data-i18n="sshLoginLabel">Login</label>
+            <input id="host-settings-ssh-user" type="text" maxlength="100">
+          </div>
+          <div class="field">
+            <label for="host-settings-ssh-port" data-i18n="sshPortLabel">Port</label>
+            <input id="host-settings-ssh-port" type="number" min="1" max="65535" step="1" value="22">
+          </div>
+          <div class="field" id="host-settings-ssh-password-field" style="display: none;">
+            <label for="host-settings-ssh-password" data-i18n="sshPasswordLabel">Password</label>
+            <input id="host-settings-ssh-password" type="password" maxlength="500" autocomplete="new-password">
+            <span class="field-hint" data-i18n="sshPasswordHint">Stored in the organizer database</span>
+          </div>
+          <div class="field" id="host-settings-ssh-key-field">
+            <label for="host-settings-ssh-key" data-i18n="sshPublicKey">Public key</label>
+            <input id="host-settings-ssh-key" type="text" readonly>
+            <span class="field-hint" data-i18n="sshKeyHint">Add this key to ~/.ssh/authorized_keys on the host</span>
+            <span class="field-hint" id="host-settings-ssh-key-install"></span>
+          </div>
+        </div>
+        <div id="host-settings-error" class="error"></div>
+        <div class="modal-actions">
+          <button type="button" id="host-settings-save" class="btn primary host-settings-save" data-i18n="save">Save</button>
+        </div>
+        <div id="host-settings-status" class="settings-status"></div>
+        <div class="danger-zone">
+          <h4 data-i18n="dangerZone">Danger zone</h4>
+          <button type="button" id="host-delete-btn" class="btn danger" data-i18n="deleteHost">Delete host</button>
         </div>
       </section>
     </div>
@@ -153,6 +189,11 @@
   <script src="/js/utils.js"></script>
   <script src="/js/i18n.js"></script>
   <script src="/js/api.js"></script>
+  <script src="/vendor/xterm.js"></script>
+  <script src="/vendor/fit.js"></script>
+  <script src="/js/window.js"></script>
+  <script src="/js/logs.js"></script>
+  <script src="/js/console.js"></script>
   <script src="/js/hosts.js"></script>
   <script src="/app.js"></script>
 </body>
