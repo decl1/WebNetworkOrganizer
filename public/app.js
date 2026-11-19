@@ -7,6 +7,7 @@ const state = {
   hostModalContainerId: null,
   hostSettingsId: null,
   hostPanels: {},
+  hostTimers: {},
 };
 
 function findContainer(containerId) {
@@ -84,6 +85,43 @@ function closeSettings() {
 async function loadContainers() {
   state.containers = await api("/api/containers");
   renderContainers();
+  syncHostTimers();
+}
+
+function syncHostTimers() {
+  const timers = state.hostTimers;
+  const liveIds = new Set();
+  for (const container of state.containers) {
+    for (const host of container.hosts) {
+      liveIds.add(host.id);
+      const seconds = Number(host.auto_refresh) || 0;
+      const intervalMs = seconds > 0 ? seconds * 1000 : 0;
+      const entry = timers[host.id] || (timers[host.id] = { interval: null, intervalMs: 0, inFlight: false });
+      if (intervalMs === 0) {
+        if (entry.interval !== null) {
+          clearInterval(entry.interval);
+          entry.interval = null;
+          entry.intervalMs = 0;
+        }
+      } else if (entry.interval === null || entry.intervalMs !== intervalMs) {
+        if (entry.interval !== null) {
+          clearInterval(entry.interval);
+        }
+        entry.intervalMs = intervalMs;
+        entry.interval = setInterval(() => {
+          refreshHost(host.id, true).catch(() => {});
+        }, intervalMs);
+      }
+    }
+  }
+  for (const hostId of Object.keys(timers)) {
+    if (!liveIds.has(Number(hostId))) {
+      if (timers[hostId].interval !== null) {
+        clearInterval(timers[hostId].interval);
+      }
+      delete timers[hostId];
+    }
+  }
 }
 
 function renderContainers() {
@@ -182,17 +220,29 @@ function handleContainerClick(event) {
         openHostModal(container.id);
       }
       break;
-    case "refresh-host": {
-      const svg = button.querySelector("svg");
-      svg.classList.remove("spin");
-      void svg.offsetWidth;
-      svg.classList.add("spin");
-      svg.addEventListener("animationend", () => svg.classList.remove("spin"), { once: true });
+    case "refresh-host":
+      if (host) {
+        const svg = button.querySelector("svg");
+        svg.classList.remove("spin");
+        void svg.offsetWidth;
+        svg.classList.add("spin");
+        svg.addEventListener("animationend", () => svg.classList.remove("spin"), { once: true });
+        refreshHost(host.id).catch((error) => alert(`${t("refreshError")} ${error}`));
+      }
       break;
-    }
     case "host-settings":
       if (host) {
         openHostSettings(host);
+      }
+      break;
+    case "host-logs":
+      if (host) {
+        openHostLogs(host);
+      }
+      break;
+    case "host-terminal":
+      if (host) {
+        openHostConsole(host);
       }
       break;
     case "toggle-panel":
@@ -211,6 +261,7 @@ function handleContainerClick(event) {
 }
 
 function init() {
+  initWindows();
   initHosts();
 
   $("#add-container-btn").addEventListener("click", () => openContainerModal());
