@@ -3,23 +3,32 @@
 from datetime import datetime, timezone
 from typing import Any
 
-from ..db import hosts_repo, logs_repo
+from ..db import hosts_repo, logs_repo, web_services_repo
+from . import docker_service
 from .netcheck import ping_host
-from .ssh_service import check_ssh
+from .ssh_service import check_ssh, run_command
+from .webcheck import check_health
 
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
 
+def _with_web_services(host: dict[str, Any]) -> dict[str, Any]:
+    host = dict(host)
+    host["web_services"] = web_services_repo.list_web_services(host["id"])
+    return host
+
+
 def list_hosts(container_id: int) -> list[dict[str, Any]]:
-    """Return all hosts of a container."""
-    return hosts_repo.list_hosts(container_id)
+    """Return all hosts of a container, with their web services."""
+    return [_with_web_services(host) for host in hosts_repo.list_hosts(container_id)]
 
 
 def get_host(host_id: int) -> dict[str, Any] | None:
-    """Return a host by id, or None if it does not exist."""
-    return hosts_repo.get_host(host_id)
+    """Return a host by id, with its web services, or None if it does not exist."""
+    host = hosts_repo.get_host(host_id)
+    return _with_web_services(host) if host is not None else None
 
 
 def create_host(
@@ -59,6 +68,8 @@ def update_host(
     ssh_user: str | None = None,
     ssh_port: int | None = None,
     ssh_password: str | None = None,
+    docker_enabled: int | None = None,
+    docker_command: str | None = None,
 ) -> dict[str, Any] | None:
     """Update a host by id and log the event; None if it does not exist."""
     previous = hosts_repo.get_host(host_id)
@@ -74,12 +85,24 @@ def update_host(
         ssh_user=ssh_user,
         ssh_port=ssh_port,
         ssh_password=ssh_password,
+        docker_enabled=docker_enabled,
+        docker_command=docker_command,
     )
     if row is None:
         return None
     changed = [
         field
-        for field in ("name", "address", "os", "auto_refresh", "ssh_auth", "ssh_user", "ssh_port")
+        for field in (
+            "name",
+            "address",
+            "os",
+            "auto_refresh",
+            "ssh_auth",
+            "ssh_user",
+            "ssh_port",
+            "docker_enabled",
+            "docker_command",
+        )
         if previous.get(field) != row.get(field)
     ]
     if (previous.get("ssh_password") or "") != (row.get("ssh_password") or ""):
@@ -116,7 +139,7 @@ def check_host_ssh(host_id: int) -> dict[str, Any] | None:
 
 
 def refresh_host(host_id: int) -> dict[str, Any] | None:
-    """Ping a host, check SSH and log the results; None if it does not exist."""
+    """Ping a host, check SSH, check web services and log the results; None if the host does not exist."""
     host = hosts_repo.get_host(host_id)
     if host is None:
         return None
@@ -132,7 +155,109 @@ def refresh_host(host_id: int) -> dict[str, Any] | None:
             logs_repo.add_log(host_id, "ok", f"Ping OK: {ms} ms")
         else:
             logs_repo.add_log(host_id, "error", f"Ping failed: {result['error']}")
-    return check_host_ssh(host_id)
+    check_host_ssh(host_id)
+    check_host_web_services(host_id)
+    return get_host(host_id)
+
+
+def list_web_services(host_id: int) -> list[dict[str, Any]]:
+    """Return all web services of a host."""
+    return web_services_repo.list_web_services(host_id)
+
+
+def get_web_service(web_service_id: int) -> dict[str, Any] | None:
+    """Return a web service by id, or None if it does not exist."""
+    return web_services_repo.get_web_service(web_service_id)
+
+
+def create_web_service(host_id: int, name: str, port: int, health_url: str) -> dict[str, Any]:
+    """Create a web service for a host and log the event."""
+    row = web_services_repo.create_web_service(host_id, name, port, health_url)
+    logs_repo.add_log(host_id, "info", f"Web service added: {name} (:{port})")
+    return row
+
+
+def update_web_service(
+    web_service_id: int,
+    name: str | None = None,
+    port: int | None = None,
+    health_url: str | None = None,
+) -> dict[str, Any] | None:
+    """Update a web service by id and log the event; None if it does not exist."""
+    previous = web_services_repo.get_web_service(web_service_id)
+    if previous is None:
+        return None
+    row = web_services_repo.update_web_service(web_service_id, name=name, port=port, health_url=health_url)
+    if row is None:
+        return None
+    changed = [
+        field
+        for field in ("name", "port", "health_url")
+        if previous.get(field) != row.get(field)
+    ]
+    if changed:
+        logs_repo.add_log(row["host_id"], "info", f"Web service updated: {', '.join(changed)}")
+    return row
+
+
+def delete_web_service(host_id: int, web_service_id: int) -> bool:
+    """Delete a web service by id; True if it existed."""
+    service = web_services_repo.get_web_service(web_service_id)
+    if service is None:
+        return False
+    ok = web_services_repo.delete_web_service(web_service_id)
+    if ok:
+        logs_repo.add_log(host_id, "info", f"Web service removed: {service['name']}")
+    return ok
+
+
+def get_host_docker(host_id: int) -> dict[str, Any] | None:
+    """Run the configured docker command over SSH and return parsed containers; None if the host does not exist."""
+    host = hosts_repo.get_host(host_id)
+    if host is None:
+        return None
+    if not host.get("docker_enabled"):
+        return {"enabled": False, "containers": [], "error": None}
+    if not (host.get("ssh_user") or "").strip():
+        return {
+            "enabled": True,
+            "containers": [],
+            "error": "SSH is not configured for this host",
+        }
+    command = (host.get("docker_command") or "sudo docker ps").strip()
+    hostname = host.get("address")
+    try:
+        exit_code, out, err = run_command(host, command)
+    except Exception as exc:
+        logs_repo.add_log(host_id, "error", f"Docker check failed: {exc}")
+        return {"enabled": True, "containers": [], "error": str(exc)}
+    if exit_code != 0:
+        message = (err or out or f"Command exited with code {exit_code}").strip()
+        logs_repo.add_log(host_id, "error", f"Docker check failed ({hostname}): {message}")
+        return {"enabled": True, "containers": [], "error": message}
+    containers = docker_service.parse_docker_ps(out)
+    logs_repo.add_log(host_id, "ok", f"Docker OK ({hostname}): {len(containers)} container(s)")
+    return {"enabled": True, "containers": containers, "error": None}
+
+
+def check_host_web_services(host_id: int) -> list[dict[str, Any]]:
+    """Check health of all web services of a host, store results and log them."""
+    host = hosts_repo.get_host(host_id)
+    if host is None:
+        return []
+    address = (host.get("address") or "").strip()
+    services = web_services_repo.list_web_services(host_id)
+    for service in services:
+        result = check_health(address, service["health_url"], service["port"])
+        status = "ok" if result["ok"] else "fail"
+        web_services_repo.set_web_service_result(service["id"], status, result["error"], _utc_now())
+        label = f"{service['name']} (:{service['port']})"
+        if result["ok"]:
+            code = result["status"] if result["status"] is not None else ""
+            logs_repo.add_log(host_id, "ok", f"Web service OK [{code}]: {label}")
+        else:
+            logs_repo.add_log(host_id, "error", f"Web service failed: {label} — {result['error']}")
+    return get_host(host_id)["web_services"]
 
 
 def list_logs(host_id: int, limit: int = 200) -> list[dict[str, Any]]:

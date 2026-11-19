@@ -89,6 +89,8 @@
         <nav>
           <a href="#" class="settings-nav-item active" data-section="general" data-i18n="general">General</a>
           <a href="#" class="settings-nav-item" data-section="ssh" data-i18n="ssh">SSH</a>
+          <a href="#" class="settings-nav-item" data-section="docker" data-i18n="docker">Docker</a>
+          <a href="#" class="settings-nav-item" data-section="webServices" data-i18n="webServices">Web services</a>
         </nav>
       </aside>
       <section class="settings-content">
@@ -135,6 +137,25 @@
             <input id="host-settings-ssh-key" type="text" readonly>
             <span class="field-hint" data-i18n="sshKeyHint">Add this key to ~/.ssh/authorized_keys on the host</span>
             <span class="field-hint" id="host-settings-ssh-key-install"></span>
+          </div>
+        </div>
+        <div id="settings-section-docker" class="settings-section" style="display: none;">
+          <h2 data-i18n="docker">Docker</h2>
+          <label class="checkbox-field">
+            <input type="checkbox" id="host-settings-docker-enabled">
+            <span data-i18n="dockerEnabled">Show docker containers via SSH</span>
+          </label>
+          <div class="field">
+            <label for="host-settings-docker-command" data-i18n="dockerCommand">Command</label>
+            <input id="host-settings-docker-command" type="text" maxlength="500" value="sudo docker ps">
+            <span class="field-hint" data-i18n="dockerCommandHint">Executed on the host over SSH</span>
+          </div>
+        </div>
+        <div id="settings-section-webServices" class="settings-section" style="display: none;">
+          <h2 data-i18n="webServices">Web services</h2>
+          <div id="ws-list" class="ws-list"></div>
+          <div class="modal-actions">
+            <button type="button" id="ws-add-btn" class="btn" data-i18n="wsAdd">Add web service</button>
           </div>
         </div>
         <div id="host-settings-error" class="error"></div>

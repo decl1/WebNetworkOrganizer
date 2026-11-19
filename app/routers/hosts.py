@@ -7,7 +7,17 @@ import threading
 from fastapi import APIRouter, HTTPException, Query, status, WebSocket, WebSocketDisconnect
 
 from ..db.hosts_repo import ContainerNotFoundError
-from ..schemas.hosts import HostIn, HostOut, HostPatch, LogOut
+from ..db.web_services_repo import HostNotFoundError
+from ..schemas.hosts import (
+    DockerOut,
+    HostIn,
+    HostOut,
+    HostPatch,
+    LogOut,
+    WebServiceIn,
+    WebServiceOut,
+    WebServicePatch,
+)
 from ..services import hosts_service, ssh_service
 
 router = APIRouter(tags=["hosts"])
@@ -53,6 +63,8 @@ def patch_host(host_id: int, body: HostPatch) -> HostOut:
         ssh_user=body.ssh_user,
         ssh_port=body.ssh_port,
         ssh_password=body.ssh_password,
+        docker_enabled=int(body.docker_enabled) if body.docker_enabled is not None else None,
+        docker_command=body.docker_command,
     )
     if row is None:
         raise HTTPException(status_code=404, detail="Host not found")
@@ -71,6 +83,66 @@ def post_refresh(host_id: int) -> HostOut:
 def get_public_key() -> dict:
     """Return the organizer's public key for installing on hosts."""
     return {"public_key": ssh_service.get_public_key()}
+
+
+@router.get("/api/hosts/{host_id}/docker", response_model=DockerOut)
+def get_docker(host_id: int) -> DockerOut:
+    result = hosts_service.get_host_docker(host_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Host not found")
+    return DockerOut(**result)
+
+
+@router.get("/api/hosts/{host_id}/web-services", response_model=list[WebServiceOut])
+def get_web_services(host_id: int) -> list[WebServiceOut]:
+    if hosts_service.get_host(host_id) is None:
+        raise HTTPException(status_code=404, detail="Host not found")
+    return [WebServiceOut(**row) for row in hosts_service.list_web_services(host_id)]
+
+
+@router.post(
+    "/api/hosts/{host_id}/web-services",
+    response_model=WebServiceOut,
+    status_code=status.HTTP_201_CREATED,
+)
+def post_web_service(host_id: int, body: WebServiceIn) -> WebServiceOut:
+    try:
+        row = hosts_service.create_web_service(host_id, body.name, body.port, body.health_url)
+    except HostNotFoundError:
+        raise HTTPException(status_code=404, detail="Host not found") from None
+    return WebServiceOut(**row)
+
+
+@router.patch("/api/hosts/{host_id}/web-services/{web_service_id}", response_model=WebServiceOut)
+def patch_web_service(host_id: int, web_service_id: int, body: WebServicePatch) -> WebServiceOut:
+    service = hosts_service.get_web_service(web_service_id)
+    if service is None or service["host_id"] != host_id:
+        raise HTTPException(status_code=404, detail="Web service not found")
+    row = hosts_service.update_web_service(
+        web_service_id,
+        name=body.name,
+        port=body.port,
+        health_url=body.health_url,
+    )
+    if row is None:
+        raise HTTPException(status_code=404, detail="Web service not found")
+    return WebServiceOut(**row)
+
+
+@router.delete(
+    "/api/hosts/{host_id}/web-services/{web_service_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+def delete_web_service(host_id: int, web_service_id: int) -> None:
+    if not hosts_service.delete_web_service(host_id, web_service_id):
+        raise HTTPException(status_code=404, detail="Web service not found")
+
+
+@router.post("/api/hosts/{host_id}/web-services/check", response_model=list[WebServiceOut])
+def post_check_web_services(host_id: int) -> list[WebServiceOut]:
+    if hosts_service.get_host(host_id) is None:
+        raise HTTPException(status_code=404, detail="Host not found")
+    return [WebServiceOut(**row) for row in hosts_service.check_host_web_services(host_id)]
 
 
 @router.post("/api/hosts/{host_id}/ssh-check", response_model=HostOut)

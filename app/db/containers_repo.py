@@ -9,20 +9,31 @@ _SELECT = "SELECT id, name, created_at FROM containers"
 
 
 def list_containers() -> list[dict[str, Any]]:
-    """Return all containers with their hosts, top to bottom."""
+    """Return all containers with their hosts and web services, top to bottom."""
     with connect() as conn:
         containers = [dict(row) for row in conn.execute(_SELECT + " ORDER BY id")]
         hosts = [
             dict(row)
             for row in conn.execute(
                 "SELECT id, container_id, name, address, os, auto_refresh, ping_status, ping_at, ping_ms, "
-                "ssh_auth, ssh_user, ssh_port, ssh_password, ssh_status, ssh_at, ssh_error, created_at "
+                "ssh_auth, ssh_user, ssh_port, ssh_password, ssh_status, ssh_at, ssh_error, "
+                "docker_enabled, docker_command, created_at "
                 "FROM hosts ORDER BY id"
             )
         ]
+        web_services = [dict(row) for row in conn.execute(
+            "SELECT id, host_id, name, port, health_url, status, checked_at, error, created_at "
+            "FROM web_services ORDER BY id"
+        )]
     by_container: dict[int, list[dict[str, Any]]] = {}
+    by_host: dict[int, list[dict[str, Any]]] = {}
     for host in hosts:
         by_container.setdefault(int(host["container_id"]), []).append(host)
+        by_host.setdefault(int(host["id"]), [])
+    for service in web_services:
+        by_host.setdefault(int(service["host_id"]), []).append(service)
+    for host in hosts:
+        host["web_services"] = by_host.get(int(host["id"]), [])
     for container in containers:
         container["hosts"] = by_container.get(int(container["id"]), [])
     return containers

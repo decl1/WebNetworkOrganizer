@@ -247,6 +247,73 @@ body {
   box-shadow: 0 0 5px rgba(248, 81, 73, 0.55);
 }
 
+.ping-dot[data-kind="ws"][data-status="fail"] {
+  background: #f85149;
+  box-shadow: 0 0 5px rgba(248, 81, 73, 0.55);
+}
+
+.ws-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 0;
+  font-size: 13px;
+}
+
+.ws-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ws-port {
+  flex-shrink: 0;
+  color: var(--muted);
+  font-family: "Cascadia Mono", Consolas, "Courier New", monospace;
+  font-size: 12px;
+}
+
+.ws-open {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  margin-left: auto;
+  border-radius: 4px;
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.ws-open:hover {
+  background: var(--hover);
+}
+
+.ws-open svg {
+  width: 14px;
+  height: 14px;
+  fill: currentColor;
+}
+
+.ws-form-row {
+  display: grid;
+  grid-template-columns: 1fr 90px 1.4fr 32px;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.ws-form-row input {
+  width: 100%;
+  min-width: 0;
+}
+
+.ws-list .host-section-empty {
+  margin-bottom: 8px;
+}
+
 .ssh-bar {
   display: flex;
   align-items: center;
@@ -414,6 +481,97 @@ body {
   padding: 12px;
   font-size: 13px;
   color: var(--muted);
+}
+
+.docker-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.docker-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text);
+}
+
+.docker-dot {
+  flex-shrink: 0;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--gray);
+}
+
+.docker-dot[data-up="1"] {
+  background: #3fb950;
+  box-shadow: 0 0 5px rgba(63, 185, 80, 0.55);
+}
+
+.docker-icon {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  color: var(--accent);
+}
+
+.docker-icon svg {
+  width: 14px;
+  height: 14px;
+  fill: currentColor;
+}
+
+.docker-name {
+  flex-shrink: 0;
+  max-width: 130px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.docker-image {
+  flex-shrink: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+}
+
+.docker-ports {
+  flex-shrink: 0;
+  margin-left: auto;
+  color: var(--muted);
+  font-family: "Cascadia Mono", Consolas, "Courier New", monospace;
+  font-size: 11px;
+}
+
+.panel-empty,
+.panel-error {
+  margin: 0;
+  font-size: 12px;
+}
+
+.panel-error {
+  color: #f85149;
+  word-break: break-word;
+}
+
+.settings-section .checkbox-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 300px;
+  margin-bottom: 12px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.settings-section .checkbox-field input {
+  flex-shrink: 0;
 }
 
 .empty {

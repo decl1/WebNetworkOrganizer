@@ -14,6 +14,7 @@ const ICONS = {
   },
   refresh: `<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 8a6.5 6.5 0 1 0 1.905-4.594L1.75 5V1.75C1.75 1.336 1.414 1 1 1S.25 1.336.25 1.75v4c0 .414.336.75.75.75h4a.75.75 0 0 0 0-1.5H3.108A5 5 0 1 1 3 8a.75.75 0 0 0-1.5 0Z"/></svg>`,
   logs: `<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 1.75C2.5 1.336 2.836 1 3.25 1h9.5c.414 0 .75.336.75.75v12.5a.75.75 0 0 1-.75.75h-9.5a.75.75 0 0 1-.75-.75Zm2.5 3a.75.75 0 0 0 0 1.5h6a.75.75 0 0 0 0-1.5Zm0 3a.75.75 0 0 0 0 1.5h6a.75.75 0 0 0 0-1.5Zm0 3a.75.75 0 0 0 0 1.5h3.5a.75.75 0 0 0 0-1.5Z"/></svg>`,
+  chevronRight: `<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6.22 3.22a.75.75 0 0 1 1.06 0l4.25 4.25a.75.75 0 0 1 0 1.06l-4.25 4.25a.75.75 0 0 1-1.06-1.06L9.94 8 6.22 4.28a.75.75 0 0 1 0-1.06Z"/></svg>`,
   minimize: `<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1.75 7h12.5v1.5H1.75z"/></svg>`,
   maximize: `<svg viewBox="0 0 16 16" aria-hidden="true"><path fill-rule="evenodd" d="M1.75 1h12.5v14H1.75V1Zm1.5 1.5v11h9.5v-11h-9.5Z"/></svg>`,
   restore: `<svg viewBox="0 0 16 16" aria-hidden="true"><path fill-rule="evenodd" d="M4.5 1.5h10v10h-10zM1.5 4.5h10v10h-10zM3 6h7v7h-7z"/></svg>`,
