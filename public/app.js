@@ -6,6 +6,8 @@ const state = {
   editingContainerId: null,
   hostModalContainerId: null,
   hostSettingsId: null,
+  hostSettingsWebServices: [],
+  hostSettingsWebServicesRemoved: [],
   hostPanels: {},
   hostTimers: {},
 };
@@ -151,6 +153,13 @@ function renderContainers() {
       </div>`,
     )
     .join("");
+  for (const container of state.containers) {
+    for (const host of container.hosts) {
+      if (state.hostPanels[host.id] === "docker") {
+        loadDockerPanel(host.id);
+      }
+    }
+  }
 }
 
 function openContainerModal(container = null) {

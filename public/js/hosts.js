@@ -4,6 +4,51 @@ function getOpenPanel(hostId) {
   return state.hostPanels[hostId] || null;
 }
 
+function hostWebServicesHtml(host) {
+  const services = host.web_services || [];
+  if (services.length === 0) {
+    return hostSectionHtml("webServices", "noWebServices");
+  }
+  const address = host.address || "";
+  const rows = services.map((service) => webServiceRowHtml(service, address)).join("");
+  return `<div class="host-section" data-host-ws="${host.id}">
+      <h4 class="host-section-title">${t("webServices")}</h4>
+      ${rows}
+    </div>`;
+}
+
+function webServiceRowHtml(service, address) {
+  const status = service.status || "unknown";
+  const title =
+    status === "ok"
+      ? t("wsOk")
+      : status === "fail"
+        ? `${t("wsFail")}: ${service.error || ""}`
+        : t("wsUnknown");
+  const openUrl = `http://${address}:${service.port}/`;
+  const openButton =
+    status === "ok"
+      ? `<a class="ws-open" href="${escapeHtml(openUrl)}" target="_blank" rel="noopener" title="${t("wsOpen")}">${ICONS.chevronRight}</a>`
+      : "";
+  return `<div class="ws-row">
+      <span class="ping-dot" data-kind="ws" data-status="${status}" title="${status === "unknown" ? "" : title}"></span>
+      <span class="ws-name" title="${title}">${escapeHtml(service.name)}</span>
+      <span class="ws-port">:${service.port}</span>
+      ${openButton}
+    </div>`;
+}
+
+function updateHostWebServices(host) {
+  const card = document.querySelector(`.host-card[data-host-id="${host.id}"]`);
+  if (!card) {
+    return;
+  }
+  const current = card.querySelector(".host-section[data-host-ws]");
+  if (current) {
+    current.outerHTML = hostWebServicesHtml(host);
+  }
+}
+
 function hostSectionHtml(titleKey, emptyKey) {
   return `
     <div class="host-section">
@@ -15,7 +60,11 @@ function hostSectionHtml(titleKey, emptyKey) {
 function hostPanelHtml(hostId, panel) {
   const open = getOpenPanel(hostId) === panel ? " open" : "";
   const titleKey = panel === "docker" ? "docker" : "sysInfo";
-  const bodyKey = panel === "docker" ? "noDockerData" : "noSysInfoData";
+  const bodyKey = panel === "docker" ? "dockerLoading" : "noSysInfoData";
+  const body =
+    panel === "docker"
+      ? `<div class="host-panel-body" data-docker-body="${hostId}">${t(bodyKey)}</div>`
+      : `<div class="host-panel-body">${t(bodyKey)}</div>`;
   return `
     <div class="host-panel${open}" data-panel-body="${panel}">
       <div class="host-panel-header">
@@ -23,8 +72,51 @@ function hostPanelHtml(hostId, panel) {
         <span class="host-panel-title">${t(titleKey)}</span>
         <button class="btn icon panel-close" data-action="close-panel" data-panel="${panel}" title="${t("close")}">${ICONS.x}</button>
       </div>
-      <div class="host-panel-body">${t(bodyKey)}</div>
+      ${body}
     </div>`;
+}
+
+function dockerRowHtml(container) {
+  const up = /^Up/i.test(container.status || "");
+  const title = `ID: ${container.id}`;
+  return `<div class="docker-item" title="${escapeHtml(title)}">
+      <span class="docker-dot" data-up="${up ? 1 : 0}"></span>
+      <span class="docker-icon">${ICONS.docker}</span>
+      <span class="docker-name">${escapeHtml(container.names || container.id)}</span>
+      <span class="docker-image">${escapeHtml(container.image || "")}</span>
+      <span class="docker-ports">${escapeHtml(container.ports || "")}</span>
+    </div>`;
+}
+
+async function loadDockerPanel(hostId) {
+  const card = document.querySelector(`.host-card[data-host-id="${hostId}"]`);
+  if (!card) {
+    return;
+  }
+  const body = card.querySelector(`[data-docker-body="${hostId}"]`);
+  if (!body) {
+    return;
+  }
+  const host = findHostById(hostId);
+  if (!host || !host.docker_enabled) {
+    body.innerHTML = `<p class="panel-empty">${t("dockerDisabled")}</p>`;
+    return;
+  }
+  try {
+    const result = await api(`/api/hosts/${hostId}/docker`);
+    if (result && result.error) {
+      body.innerHTML = `<p class="panel-error">${t("dockerLoadError")}: ${escapeHtml(result.error)}</p>`;
+      return;
+    }
+    const containers = (result && result.containers) || [];
+    if (containers.length === 0) {
+      body.innerHTML = `<p class="panel-empty">${t("dockerNoContainers")}</p>`;
+      return;
+    }
+    body.innerHTML = `<div class="docker-list">${containers.map(dockerRowHtml).join("")}</div>`;
+  } catch (error) {
+    body.innerHTML = `<p class="panel-error">${t("dockerLoadError")}: ${escapeHtml(String(error))}</p>`;
+  }
 }
 
 function hostAddressHtml(host) {
@@ -71,7 +163,7 @@ function hostCardHtml(host) {
           </div>
         </div>
         ${hostSshBarHtml(host)}
-        ${hostSectionHtml("webServices", "noWebServices")}
+        ${hostWebServicesHtml(host)}
         ${hostSectionHtml("services", "noServices")}
         <div class="host-footer">
           <button class="btn icon" data-action="host-settings" data-i18n-title="hostSettings" title="${t("hostSettings")}">${ICONS.gear}</button>
@@ -170,6 +262,7 @@ async function refreshHost(hostId, silent = false) {
       Object.assign(host, updated);
       updateHostPingDot(host);
       updateHostSshBar(host);
+      updateHostWebServices(host);
     }
   } catch (error) {
     if (silent) {
@@ -192,6 +285,8 @@ function clearHostSettingsErrors() {
   $("#host-settings-ssh-user").classList.remove("field-invalid");
   $("#host-settings-ssh-port").classList.remove("field-invalid");
   $("#host-settings-ssh-password").classList.remove("field-invalid");
+  $("#host-settings-docker-command").classList.remove("field-invalid");
+  $("#ws-list").querySelectorAll(".field-invalid").forEach((input) => input.classList.remove("field-invalid"));
 }
 
 function setHostSettingsSection(section) {
@@ -240,6 +335,16 @@ function showHostSettingsError(fieldId, message) {
 
 function openHostSettings(host) {
   state.hostSettingsId = host.id;
+  state.hostSettingsWebServices = (host.web_services || []).map((service) => ({
+    uid: `db-${service.id}`,
+    id: service.id,
+    orig: { name: service.name, port: service.port, health_url: service.health_url },
+    name: service.name,
+    port: service.port,
+    health_url: service.health_url || "",
+  }));
+  state.hostSettingsWebServicesRemoved = [];
+  renderWebServicesSettings();
   $("#host-settings-name").value = host.name;
   $("#host-settings-address").value = host.address;
   $("#host-settings-auto-refresh").value = host.auto_refresh ?? 0;
@@ -247,6 +352,8 @@ function openHostSettings(host) {
   $("#host-settings-ssh-user").value = host.ssh_user || "";
   $("#host-settings-ssh-port").value = host.ssh_port || 22;
   $("#host-settings-ssh-password").value = host.ssh_password || "";
+  $("#host-settings-docker-enabled").checked = !!host.docker_enabled;
+  $("#host-settings-docker-command").value = host.docker_command || "sudo docker ps";
   clearHostSettingsErrors();
   syncSshAuthFields();
   updateSshKeyInstallHint(host);
@@ -268,6 +375,104 @@ function setHostStatus(text, kind = "") {
   const status = $("#host-settings-status");
   status.textContent = text;
   status.className = "settings-status" + (kind ? " " + kind : "");
+}
+
+let wsUidCounter = 1;
+
+function wsSettingsRowHtml(entry) {
+  return `<div class="ws-form-row" data-entry-id="${entry.uid}">
+      <input class="ws-input-name" type="text" maxlength="100" placeholder="${t("wsName")}" value="${escapeHtml(entry.name)}">
+      <input class="ws-input-port" type="number" min="1" max="65535" step="1" placeholder="${t("wsPort")}" value="${entry.port}">
+      <input class="ws-input-health" type="text" maxlength="500" placeholder="${t("wsHealthUrl")}" value="${escapeHtml(entry.health_url)}" title="${t("wsHealthUrlHint")}">
+      <button type="button" class="btn icon ws-input-remove" data-i18n-title="wsRemove" title="${t("wsRemove")}">${ICONS.trash}</button>
+    </div>`;
+}
+
+function renderWebServicesSettings() {
+  const list = $("#ws-list");
+  const entries = state.hostSettingsWebServices;
+  if (entries.length === 0) {
+    list.innerHTML = `<p class="host-section-empty">${t("noWebServices")}</p>`;
+    return;
+  }
+  list.innerHTML = entries.map(wsSettingsRowHtml).join("");
+}
+
+function addWebServiceRow() {
+  state.hostSettingsWebServices.push({
+    uid: `new-${wsUidCounter++}`,
+    id: null,
+    orig: { name: "", port: 80, health_url: "" },
+    name: "",
+    port: 80,
+    health_url: "",
+  });
+  renderWebServicesSettings();
+}
+
+function removeWebServiceRow(entryId) {
+  const index = state.hostSettingsWebServices.findIndex((entry) => entry.uid === entryId);
+  if (index === -1) {
+    return;
+  }
+  const entry = state.hostSettingsWebServices[index];
+  if (entry.id !== null) {
+    state.hostSettingsWebServicesRemoved.push(entry.id);
+  }
+  state.hostSettingsWebServices.splice(index, 1);
+  renderWebServicesSettings();
+}
+
+function collectWebServicesFromSettings() {
+  return state.hostSettingsWebServices.map((entry) => {
+    const row = document.querySelector(`.ws-form-row[data-entry-id="${entry.uid}"]`);
+    const name = row ? row.querySelector(".ws-input-name").value.trim() : entry.name;
+    const port = row ? Number(row.querySelector(".ws-input-port").value) : entry.port;
+    const healthUrl = row ? row.querySelector(".ws-input-health").value.trim() : entry.health_url;
+    return { ...entry, name, port, health_url: healthUrl };
+  });
+}
+
+async function saveWebServices(hostId) {
+  const entries = collectWebServicesFromSettings();
+  for (const entry of entries) {
+    if (!entry.name) {
+      setHostStatus("");
+      showHostSettingsError(`.ws-form-row[data-entry-id="${entry.uid}"] .ws-input-name`, t("wsNameRequired"));
+      return false;
+    }
+    if (!Number.isInteger(entry.port) || entry.port < 1 || entry.port > 65535) {
+      setHostStatus("");
+      showHostSettingsError(`.ws-form-row[data-entry-id="${entry.uid}"] .ws-input-port`, t("wsPortRequired"));
+      return false;
+    }
+  }
+  for (const entry of entries) {
+    if (entry.id === null) {
+      const created = await api(`/api/hosts/${hostId}/web-services`, {
+        method: "POST",
+        body: JSON.stringify({ name: entry.name, port: entry.port, health_url: entry.health_url }),
+      });
+      entry.id = created.id;
+      entry.uid = `db-${created.id}`;
+      entry.orig = { name: entry.name, port: entry.port, health_url: entry.health_url };
+      continue;
+    }
+    if (
+      entry.name !== entry.orig.name ||
+      entry.port !== entry.orig.port ||
+      entry.health_url !== entry.orig.health_url
+    ) {
+      await api(`/api/hosts/${hostId}/web-services/${entry.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ name: entry.name, port: entry.port, health_url: entry.health_url }),
+      });
+    }
+  }
+  for (const serviceId of state.hostSettingsWebServicesRemoved) {
+    await api(`/api/hosts/${hostId}/web-services/${serviceId}`, { method: "DELETE" });
+  }
+  return true;
 }
 
 async function saveHostSettings() {
@@ -303,6 +508,12 @@ async function saveHostSettings() {
     showHostSettingsError("#host-settings-ssh-password", t("sshPasswordRequired"));
     return;
   }
+  const dockerEnabled = $("#host-settings-docker-enabled").checked;
+  const dockerCommand = $("#host-settings-docker-command").value.trim();
+  if (dockerEnabled && !dockerCommand) {
+    showHostSettingsError("#host-settings-docker-command", t("dockerCommandRequired"));
+    return;
+  }
   setHostStatus(t("saving"));
   try {
     await api(`/api/hosts/${hostId}`, {
@@ -315,8 +526,14 @@ async function saveHostSettings() {
         ssh_user: sshUser,
         ssh_port: sshPort,
         ssh_password: sshPassword,
+        docker_enabled: dockerEnabled,
+        docker_command: dockerCommand || "sudo docker ps",
       }),
     });
+    const saved = await saveWebServices(hostId);
+    if (!saved) {
+      return;
+    }
     setHostStatus(t("saved"), "ok");
     await loadContainers();
   } catch (error) {
@@ -365,6 +582,9 @@ function toggleHostPanel(hostId, panel) {
     state.hostPanels[hostId] = panel;
   }
   setPanelState(hostId, state.hostPanels[hostId] || null);
+  if (state.hostPanels[hostId] === "docker") {
+    loadDockerPanel(hostId);
+  }
 }
 
 function closeHostPanel(hostId, panel) {
@@ -411,6 +631,21 @@ function initHosts() {
   $("#host-settings-close").addEventListener("click", closeHostSettings);
   document.querySelectorAll(".host-settings-save").forEach((btn) => btn.addEventListener("click", saveHostSettings));
   $("#host-delete-btn").addEventListener("click", deleteHostFlow);
+  $("#ws-add-btn").addEventListener("click", addWebServiceRow);
+  $("#ws-list").addEventListener("click", (event) => {
+    const removeBtn = event.target.closest(".ws-input-remove");
+    if (!removeBtn) {
+      return;
+    }
+    const row = removeBtn.closest(".ws-form-row");
+    if (row) {
+      removeWebServiceRow(row.dataset.entryId);
+    }
+  });
+  $("#ws-list").addEventListener("input", () => {
+    clearSettingsInputErrors();
+    setHostStatus("");
+  });
   $("#host-settings-overlay").querySelectorAll(".settings-nav-item").forEach((item) => {
     item.addEventListener("click", (event) => {
       event.preventDefault();
@@ -448,5 +683,7 @@ function initHosts() {
     const host = state.hostSettingsId !== null ? findHostById(state.hostSettingsId) : null;
     updateSshKeyInstallHint(host);
   });
+  const settingsDockerCommand = $("#host-settings-docker-command");
+  settingsDockerCommand.addEventListener("input", clearSettingsInputErrors);
   settingsPassword.addEventListener("input", clearSettingsInputErrors);
 }

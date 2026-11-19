@@ -35,6 +35,8 @@ CREATE TABLE IF NOT EXISTS hosts (
     ssh_status TEXT NOT NULL DEFAULT 'unknown',
     ssh_at TEXT,
     ssh_error TEXT,
+    docker_enabled INTEGER NOT NULL DEFAULT 0,
+    docker_command TEXT NOT NULL DEFAULT 'sudo docker ps',
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -44,6 +46,18 @@ CREATE TABLE IF NOT EXISTS host_logs (
     ts TEXT NOT NULL DEFAULT (datetime('now')),
     level TEXT NOT NULL DEFAULT 'info',
     message TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS web_services (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    host_id INTEGER NOT NULL REFERENCES hosts(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    port INTEGER NOT NULL,
+    health_url TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'unknown',
+    checked_at TEXT,
+    error TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 """
 
@@ -107,6 +121,16 @@ _MIGRATIONS = [
         "hosts",
         "ssh_error",
         "ALTER TABLE hosts ADD COLUMN ssh_error TEXT",
+    ),
+    (
+        "hosts",
+        "docker_enabled",
+        "ALTER TABLE hosts ADD COLUMN docker_enabled INTEGER NOT NULL DEFAULT 0",
+    ),
+    (
+        "hosts",
+        "docker_command",
+        "ALTER TABLE hosts ADD COLUMN docker_command TEXT NOT NULL DEFAULT 'sudo docker ps'",
     ),
 ]
 

@@ -92,6 +92,21 @@ def check_ssh(host: dict[str, Any], timeout: int = 5) -> dict:
             client.close()
 
 
+def run_command(host: dict[str, Any], command: str, timeout: int = 15) -> tuple[int, str, str]:
+    """Connect to the host, run a shell command and return (exit code, stdout, stderr)."""
+    client = None
+    try:
+        client = _connect(host, timeout)
+        _, stdout, stderr = client.exec_command(command, timeout=timeout)
+        out = stdout.read().decode("utf-8", "replace")
+        err = stderr.read().decode("utf-8", "replace")
+        exit_code = stdout.channel.recv_exit_status()
+        return exit_code, out, err
+    finally:
+        if client is not None:
+            client.close()
+
+
 def open_shell(host: dict[str, Any]) -> tuple[paramiko.SSHClient, paramiko.Channel]:
     """Connect to the host and start an interactive PTY shell."""
     client = _connect(host, 8)
