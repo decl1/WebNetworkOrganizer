@@ -25,3 +25,24 @@ class FsReadOut(BaseModel):
     binary: bool = False
     truncated: bool = False
     content: str = ""
+
+
+class FsRenameIn(BaseModel):
+    path: str
+    new_name: str
+
+
+class FsDeleteIn(BaseModel):
+    paths: list[str] = []
+
+
+class FsMkdirIn(BaseModel):
+    path: str
+    name: str
+
+
+class FsCopyIn(BaseModel):
+    paths: list[str] = []
+    target_host_id: int
+    target_dir: str = "~"
+    move: bool = False

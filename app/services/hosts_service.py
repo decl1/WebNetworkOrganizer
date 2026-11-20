@@ -42,6 +42,8 @@ def create_host(
     ssh_user: str = "",
     ssh_port: int = 22,
     ssh_password: str = "",
+    docker_enabled: int = 0,
+    docker_command: str = "sudo docker ps",
     sudo_password: str = "",
 ) -> dict[str, Any]:
     """Create a host in a container and log the event."""
@@ -55,6 +57,8 @@ def create_host(
         ssh_user=ssh_user,
         ssh_port=ssh_port,
         ssh_password=ssh_password,
+        docker_enabled=docker_enabled,
+        docker_command=docker_command,
         sudo_password=sudo_password,
     )
     logs_repo.add_log(row["id"], "info", "Host created")

@@ -1,11 +1,11 @@
-"""Files router: browse, read, write, upload and download files on hosts over SSH."""
+"""Files router: browse, read, write, upload, download and manage files on hosts."""
 
 import json
 
 from fastapi import APIRouter, Body, File, Query, UploadFile
 from fastapi.responses import StreamingResponse
 
-from ..schemas.files import FsListOut, FsReadOut
+from ..schemas.files import FsCopyIn, FsDeleteIn, FsListOut, FsMkdirIn, FsReadOut, FsRenameIn
 from ..services import file_service, hosts_service
 
 router = APIRouter(tags=["files"])
@@ -97,6 +97,83 @@ def fs_write(
     except Exception as exc:
         return {"error": f"Failed to save the file: {exc}"}
     return {"ok": True, "path": result["path"], "bytes": result["bytes"]}
+
+
+@router.post("/api/hosts/{host_id}/fs/rename")
+def fs_rename(host_id: int, payload: FsRenameIn) -> dict:
+    """Rename a file or folder."""
+    host = _get_host(host_id)
+    if host is None:
+        return {"error": "Host not found"}
+    try:
+        new_path = file_service.rename_entry(host, payload.path, payload.new_name)
+    except file_service.FsError as exc:
+        return {"error": str(exc)}
+    except Exception as exc:
+        return {"error": f"Rename failed: {exc}"}
+    return {"ok": True, "path": new_path}
+
+
+@router.post("/api/hosts/{host_id}/fs/delete")
+def fs_delete(host_id: int, payload: FsDeleteIn) -> dict:
+    """Delete selected files/folders (recursively)."""
+    host = _get_host(host_id)
+    if host is None:
+        return {"error": "Host not found"}
+    try:
+        deleted = file_service.delete_paths(host, payload.paths)
+    except file_service.FsError as exc:
+        return {"error": str(exc)}
+    except Exception as exc:
+        return {"error": f"Delete failed: {exc}"}
+    return {"ok": True, "deleted": deleted}
+
+
+@router.post("/api/hosts/{host_id}/fs/mkdir")
+def fs_mkdir(host_id: int, payload: FsMkdirIn) -> dict:
+    """Create a folder inside ``payload.path``."""
+    host = _get_host(host_id)
+    if host is None:
+        return {"error": "Host not found"}
+    try:
+        path = file_service.make_dir(host, payload.path, payload.name)
+    except file_service.FsError as exc:
+        return {"error": str(exc)}
+    except Exception as exc:
+        return {"error": f"Failed to create the folder: {exc}"}
+    return {"ok": True, "path": path}
+
+
+@router.post("/api/hosts/{host_id}/fs/copy")
+def fs_copy(host_id: int, payload: FsCopyIn) -> dict:
+    """Copy or move entries to another folder on the same host, or to another host."""
+    src = _get_host(host_id)
+    dst = _get_host(payload.target_host_id)
+    if src is None or dst is None:
+        return {"error": "Host not found"}
+    try:
+        count = file_service.copy_paths(src, dst, payload.paths, payload.target_dir, payload.move)
+    except file_service.FsError as exc:
+        return {"error": str(exc)}
+    except Exception as exc:
+        return {"error": f"Copy failed: {exc}"}
+    return {"ok": True, "items": count, "moved": payload.move}
+
+
+@router.get("/api/hosts/{host_id}/fs/zip")
+def fs_zip(host_id: int, paths: list[str] = Query(...)) -> StreamingResponse:
+    """Stream a tar.gz archive of the selected entries."""
+    host = _get_host(host_id)
+    if host is None:
+        return _json_error("Host not found", 404)
+    try:
+        name, _size, stream = file_service.create_archive(host, paths)
+    except file_service.FsError as exc:
+        return _json_error(str(exc), 400)
+    except Exception as exc:
+        return _json_error(f"Archive creation failed: {exc}", 500)
+    headers = {"Content-Disposition": f'attachment; filename="{_header_filename(name)}"'}
+    return StreamingResponse(stream, media_type="application/gzip", headers=headers, status_code=200)
 
 
 def _get_host(host_id: int):
