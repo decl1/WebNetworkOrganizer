@@ -37,7 +37,8 @@ The app exposes an MCP server over streamable HTTP at `/mcp` — statuses are al
 - SSH: key setup, public key, ssh-copy-id hint / настройки ключей
 - Interactive console (xterm.js, PTY over WebSocket) / консоль
 - Web services / веб-сервисы: URLs, status check, health
-- Docker: enable per host + command (default `sudo docker ps`) / докер-контейнеры по SSH
+- Docker: enable per host + command (default `sudo docker ps`); sudo fallbacks are tried automatically (docker group, NOPASSWD, sudo password in the General section of host settings) / докер-контейнеры по SSH; sudo-варианты пробуются автоматически (группа docker, NOPASSWD, пароль sudo в общих настройках хоста)
+- SysInfo: customizable per-host console parameters (defaults: CPU, RAM, disk, temperature); each parameter supports an optional regex to extract the value from the command output (capture group 1, or the whole match); `sudo` supported via the host's sudo password (General settings) / кастомные sysinfo-параметры хоста (по умолчанию: ЦП, ОЗУ, диск, температура); у каждого параметра есть необязательный regex для извлечения значения из вывода команды (первая группа или всё найденное); `sudo` поддерживается через пароль sudo хоста (общие настройки)
 
 ## Layout / Структура
 

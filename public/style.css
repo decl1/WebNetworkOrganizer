@@ -310,8 +310,61 @@ body {
   min-width: 0;
 }
 
+.si-form-row {
+  display: grid;
+  grid-template-columns: 1fr 1.8fr 1.3fr 32px;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.si-form-row input {
+  width: 100%;
+  min-width: 0;
+}
+
 .ws-list .host-section-empty {
   margin-bottom: 8px;
+}
+
+.si-list .host-section-empty {
+  margin-bottom: 8px;
+}
+
+.sysinfo-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.sysinfo-item {
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.sysinfo-name {
+  margin-bottom: 2px;
+  font-size: 11px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  overflow-wrap: anywhere;
+}
+
+.sysinfo-value {
+  margin: 0;
+  font-size: 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.sysinfo-error {
+  margin: 0;
+  font-size: 12px;
+  color: #f85149;
+  word-break: break-word;
 }
 
 .ssh-bar {
@@ -577,6 +630,13 @@ body {
 .panel-error {
   color: #f85149;
   word-break: break-word;
+}
+
+.panel-hint {
+  margin: 6px 0 0;
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.45;
 }
 
 .settings-section .checkbox-field {

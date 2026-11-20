@@ -91,6 +91,7 @@
           <a href="#" class="settings-nav-item" data-section="ssh" data-i18n="ssh">SSH</a>
           <a href="#" class="settings-nav-item" data-section="docker" data-i18n="docker">Docker</a>
           <a href="#" class="settings-nav-item" data-section="webServices" data-i18n="webServices">Web services</a>
+          <a href="#" class="settings-nav-item" data-section="sysinfo" data-i18n="sysInfo">SysInfo</a>
         </nav>
       </aside>
       <section class="settings-content">
@@ -108,6 +109,11 @@
             <label for="host-settings-auto-refresh" data-i18n="autoRefreshLabel">Auto-refresh interval, sec</label>
             <input id="host-settings-auto-refresh" type="number" min="0" max="86400" step="1" value="0">
             <span class="field-hint" data-i18n="autoRefreshHint">0 — disabled</span>
+          </div>
+          <div class="field">
+            <label for="host-settings-sudo-password" data-i18n="sudoPasswordLabel">Sudo password</label>
+            <input id="host-settings-sudo-password" type="password" maxlength="500" autocomplete="new-password">
+            <span class="field-hint" data-i18n="sudoPasswordHint">Used for Docker and SysInfo commands over SSH when sudo requires a password</span>
           </div>
         </div>
         <div id="settings-section-ssh" class="settings-section" style="display: none;">
@@ -148,15 +154,19 @@
           <div class="field">
             <label for="host-settings-docker-command" data-i18n="dockerCommand">Command</label>
             <input id="host-settings-docker-command" type="text" maxlength="500" value="sudo docker ps">
-            <span class="field-hint" data-i18n="dockerCommandHint">Executed on the host over SSH</span>
+            <span class="field-hint" data-i18n="dockerCommandHint">Executed on the host over SSH; sudo fallbacks are tried automatically</span>
           </div>
         </div>
-        <div id="settings-section-webServices" class="settings-section" style="display: none;">
+<div id="settings-section-webServices" class="settings-section" style="display: none;">
           <h2 data-i18n="webServices">Web services</h2>
           <div id="ws-list" class="ws-list"></div>
-          <div class="modal-actions">
-            <button type="button" id="ws-add-btn" class="btn" data-i18n="wsAdd">Add web service</button>
-          </div>
+          <button type="button" id="ws-add-btn" class="btn" data-i18n="wsAdd">Add service</button>
+        </div>
+        <div id="settings-section-sysinfo" class="settings-section" style="display: none;">
+          <h2 data-i18n="sysInfo">SysInfo</h2>
+          <p class="field-hint" data-i18n="sysInfoHint">Parameter name: console command to get its value, and an optional regex to extract just the needed part from the output (empty — the whole output is shown)</p>
+          <div id="si-list" class="si-list"></div>
+          <button type="button" id="si-add-btn" class="btn" data-i18n="sysInfoAdd">Add parameter</button>
         </div>
         <div id="host-settings-error" class="error"></div>
         <div class="modal-actions">
@@ -200,8 +210,8 @@
               <option value="ru">Русский</option>
             </select>
           </div>
-          <div id="settings-status" class="settings-status"></div>
         </div>
+        <div id="settings-status" class="settings-status"></div>
       </section>
     </div>
   </div>

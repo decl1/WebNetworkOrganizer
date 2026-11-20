@@ -57,11 +57,10 @@ function hostSectionHtml(titleKey, emptyKey) {
 function hostPanelHtml(hostId, panel) {
   const open = getOpenPanel(hostId) === panel ? " open" : "";
   const titleKey = panel === "docker" ? "docker" : "sysInfo";
-  const bodyKey = panel === "docker" ? "dockerLoading" : "noSysInfoData";
   const body =
     panel === "docker"
-      ? `<div class="host-panel-body" data-docker-body="${hostId}">${t(bodyKey)}</div>`
-      : `<div class="host-panel-body">${t(bodyKey)}</div>`;
+      ? `<div class="host-panel-body" data-docker-body="${hostId}">${t("dockerLoading")}</div>`
+      : `<div class="host-panel-body" data-sysinfo-body="${hostId}">${t("sysInfoLoading")}</div>`;
   return `
     <div class="host-panel${open}" data-panel-body="${panel}">
       <div class="host-panel-header">
@@ -102,7 +101,8 @@ async function loadDockerPanel(hostId) {
   try {
     const result = await api(`/api/hosts/${hostId}/docker`);
     if (result && result.error) {
-      body.innerHTML = `<p class="panel-error">${t("dockerLoadError")}: ${escapeHtml(result.error)}</p>`;
+      const hintHtml = result.hint ? `<p class="panel-hint">${t(`dockerHint-${result.hint}`)}</p>` : "";
+      body.innerHTML = `<p class="panel-error">${t("dockerLoadError")}: ${escapeHtml(result.error)}</p>${hintHtml}`;
       return;
     }
     const containers = (result && result.containers) || [];
@@ -114,6 +114,51 @@ async function loadDockerPanel(hostId) {
   } catch (error) {
     body.innerHTML = `<p class="panel-error">${t("dockerLoadError")}: ${escapeHtml(String(error))}</p>`;
   }
+}
+
+async function loadSysInfoPanel(hostId) {
+  const card = document.querySelector(`.host-card[data-host-id="${hostId}"]`);
+  if (!card) {
+    return;
+  }
+  const body = card.querySelector(`[data-sysinfo-body="${hostId}"]`);
+  if (!body) {
+    return;
+  }
+  const host = findHostById(hostId);
+  if (!host) {
+    return;
+  }
+  try {
+    const result = await api(`/api/hosts/${hostId}/sysinfo`);
+    if (result && result.error) {
+      body.innerHTML = `<p class="panel-error">${t("sysInfoLoadError")}: ${escapeHtml(result.error)}</p>`;
+      return;
+    }
+    const items = (result && result.results) || [];
+    if (items.length === 0) {
+      body.innerHTML = `<p class="panel-empty">${t("sysInfoEmpty")}</p>`;
+      return;
+    }
+    body.innerHTML = `<div class="sysinfo-list">${items.map(sysInfoItemHtml).join("")}</div>`;
+  } catch (error) {
+    body.innerHTML = `<p class="panel-error">${t("sysInfoLoadError")}: ${escapeHtml(String(error))}</p>`;
+  }
+}
+
+function sysInfoItemHtml(item) {
+  const parseNote = item.parse ? ` | ${t("sysInfoParse")}: ${item.parse}` : "";
+  const title = `${escapeHtml(item.name)} — ${escapeHtml(item.command)}${escapeHtml(parseNote)}`;
+  if (item.error) {
+    return `<div class="sysinfo-item" title="${title}">
+      <div class="sysinfo-name">${escapeHtml(item.name)}</div>
+      <p class="sysinfo-error">${escapeHtml(item.error)}</p>
+    </div>`;
+  }
+  return `<div class="sysinfo-item" title="${title}">
+    <div class="sysinfo-name">${escapeHtml(item.name)}</div>
+    <pre class="sysinfo-value">${escapeHtml(item.value || "—")}</pre>
+  </div>`;
 }
 
 function hostAddressHtml(host) {
@@ -322,7 +367,9 @@ function clearHostSettingsErrors() {
   $("#host-settings-ssh-port").classList.remove("field-invalid");
   $("#host-settings-ssh-password").classList.remove("field-invalid");
   $("#host-settings-docker-command").classList.remove("field-invalid");
+  $("#host-settings-sudo-password").classList.remove("field-invalid");
   $("#ws-list").querySelectorAll(".field-invalid").forEach((input) => input.classList.remove("field-invalid"));
+  $("#si-list").querySelectorAll(".field-invalid").forEach((input) => input.classList.remove("field-invalid"));
 }
 
 function setHostSettingsSection(section) {
@@ -390,6 +437,22 @@ function openHostSettings(host) {
   $("#host-settings-ssh-password").value = host.ssh_password || "";
   $("#host-settings-docker-enabled").checked = !!host.docker_enabled;
   $("#host-settings-docker-command").value = host.docker_command || "sudo docker ps";
+  $("#host-settings-sudo-password").value = host.sudo_password || "";
+  state.hostSettingsSysInfo = [];
+  renderSysInfoSettings();
+  api(`/api/hosts/${host.id}/sysinfo/params`)
+    .then((params) => {
+      state.hostSettingsSysInfo = (params || []).map((param) => ({
+        uid: `db-${param.id}`,
+        id: param.id,
+        orig: { name: param.name, command: param.command, parse: param.parse || "" },
+        name: param.name,
+        command: param.command,
+        parse: param.parse || "",
+      }));
+      renderSysInfoSettings();
+    })
+    .catch(() => renderSysInfoSettings());
   clearHostSettingsErrors();
   syncSshAuthFields();
   updateSshKeyInstallHint(host);
@@ -511,6 +574,89 @@ async function saveWebServices(hostId) {
   return true;
 }
 
+let siUidCounter = 1;
+
+function siSettingsRowHtml(entry) {
+  return `<div class="si-form-row" data-entry-id="${entry.uid}">
+      <input class="si-input-name" type="text" maxlength="100" placeholder="${t("sysInfoName")}" value="${escapeHtml(entry.name)}">
+      <input class="si-input-command" type="text" maxlength="1000" placeholder="${t("sysInfoCommand")}" value="${escapeHtml(entry.command)}">
+      <input class="si-input-parse" type="text" maxlength="500" placeholder="${t("sysInfoParse")}" title="${t("sysInfoParseHint")}" value="${escapeHtml(entry.parse)}">
+      <button type="button" class="btn icon si-input-remove" data-i18n-title="sysInfoRemove" title="${t("sysInfoRemove")}">${ICONS.trash}</button>
+    </div>`;
+}
+
+function renderSysInfoSettings() {
+  const list = $("#si-list");
+  const entries = state.hostSettingsSysInfo || [];
+  if (entries.length === 0) {
+    list.innerHTML = `<p class="host-section-empty">${t("sysInfoEmpty")}</p>`;
+    return;
+  }
+  list.innerHTML = entries.map(siSettingsRowHtml).join("");
+}
+
+function addSysInfoRow() {
+  state.hostSettingsSysInfo.push({
+    uid: `new-${siUidCounter++}`,
+    id: null,
+    orig: { name: "", command: "", parse: "" },
+    name: "",
+    command: "",
+    parse: "",
+  });
+  renderSysInfoSettings();
+}
+
+function removeSysInfoRow(entryId) {
+  const index = state.hostSettingsSysInfo.findIndex((entry) => entry.uid === entryId);
+  if (index === -1) {
+    return;
+  }
+  state.hostSettingsSysInfo.splice(index, 1);
+  renderSysInfoSettings();
+}
+
+function collectSysInfoFromSettings() {
+  return (state.hostSettingsSysInfo || []).map((entry) => {
+    const row = document.querySelector(`.si-form-row[data-entry-id="${entry.uid}"]`);
+    const name = row ? row.querySelector(".si-input-name").value.trim() : entry.name;
+    const command = row ? row.querySelector(".si-input-command").value.trim() : entry.command;
+    const parse = row ? row.querySelector(".si-input-parse").value.trim() : entry.parse;
+    return { ...entry, name, command, parse };
+  });
+}
+
+async function saveSysInfoParams(hostId) {
+  const entries = collectSysInfoFromSettings();
+  for (const entry of entries) {
+    if (!entry.name) {
+      setHostStatus("");
+      showHostSettingsError(`.si-form-row[data-entry-id="${entry.uid}"] .si-input-name`, t("sysInfoNameRequired"));
+      return false;
+    }
+    if (!entry.command) {
+      setHostStatus("");
+      showHostSettingsError(`.si-form-row[data-entry-id="${entry.uid}"] .si-input-command`, t("sysInfoCommandRequired"));
+      return false;
+    }
+    if (entry.parse) {
+      try {
+        new RegExp(entry.parse);
+      } catch {
+        setHostStatus("");
+        showHostSettingsError(`.si-form-row[data-entry-id="${entry.uid}"] .si-input-parse`, t("sysInfoParseInvalid"));
+        return false;
+      }
+    }
+  }
+  const params = entries.map((entry) => ({ name: entry.name, command: entry.command, parse: entry.parse }));
+  await api(`/api/hosts/${hostId}/sysinfo/params`, {
+    method: "PUT",
+    body: JSON.stringify({ params }),
+  });
+  return true;
+}
+
 async function saveHostSettings() {
   const hostId = state.hostSettingsId;
   if (hostId === null) {
@@ -564,10 +710,15 @@ async function saveHostSettings() {
         ssh_password: sshPassword,
         docker_enabled: dockerEnabled,
         docker_command: dockerCommand || "sudo docker ps",
+        sudo_password: $("#host-settings-sudo-password").value.trim(),
       }),
     });
     const saved = await saveWebServices(hostId);
     if (!saved) {
+      return;
+    }
+    const sysInfoSaved = await saveSysInfoParams(hostId);
+    if (!sysInfoSaved) {
       return;
     }
     setHostStatus(t("saved"), "ok");
@@ -621,6 +772,9 @@ function toggleHostPanel(hostId, panel) {
   if (state.hostPanels[hostId] === "docker") {
     loadDockerPanel(hostId);
   }
+  if (state.hostPanels[hostId] === "sysinfo") {
+    loadSysInfoPanel(hostId);
+  }
 }
 
 function closeHostPanel(hostId, panel) {
@@ -668,6 +822,21 @@ function initHosts() {
   document.querySelectorAll(".host-settings-save").forEach((btn) => btn.addEventListener("click", saveHostSettings));
   $("#host-delete-btn").addEventListener("click", deleteHostFlow);
   $("#ws-add-btn").addEventListener("click", addWebServiceRow);
+  $("#si-add-btn").addEventListener("click", addSysInfoRow);
+  $("#si-list").addEventListener("click", (event) => {
+    const removeBtn = event.target.closest(".si-input-remove");
+    if (!removeBtn) {
+      return;
+    }
+    const row = removeBtn.closest(".si-form-row");
+    if (row) {
+      removeSysInfoRow(row.dataset.entryId);
+    }
+  });
+  $("#si-list").addEventListener("input", () => {
+    clearSettingsInputErrors();
+    setHostStatus("");
+  });
   $("#ws-list").addEventListener("click", (event) => {
     const removeBtn = event.target.closest(".ws-input-remove");
     if (!removeBtn) {

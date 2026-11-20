@@ -3,11 +3,11 @@
 from datetime import datetime, timezone
 from typing import Any
 
-from ..db import hosts_repo, logs_repo, web_services_repo
+from ..db import hosts_repo, logs_repo, sysinfo_repo, web_services_repo
 from . import docker_service
 from .netcheck import ping_host
 from .snapshot import write_status_snapshot
-from .ssh_service import check_ssh, run_command
+from .ssh_service import check_ssh, run_command_variants
 from .webcheck import check_health
 
 
@@ -42,6 +42,7 @@ def create_host(
     ssh_user: str = "",
     ssh_port: int = 22,
     ssh_password: str = "",
+    sudo_password: str = "",
 ) -> dict[str, Any]:
     """Create a host in a container and log the event."""
     row = hosts_repo.create_host(
@@ -54,8 +55,10 @@ def create_host(
         ssh_user=ssh_user,
         ssh_port=ssh_port,
         ssh_password=ssh_password,
+        sudo_password=sudo_password,
     )
     logs_repo.add_log(row["id"], "info", "Host created")
+    sysinfo_repo.seed_defaults(row["id"])
     write_status_snapshot()
     return row
 
@@ -72,6 +75,7 @@ def update_host(
     ssh_password: str | None = None,
     docker_enabled: int | None = None,
     docker_command: str | None = None,
+    sudo_password: str | None = None,
 ) -> dict[str, Any] | None:
     """Update a host by id and log the event; None if it does not exist."""
     previous = hosts_repo.get_host(host_id)
@@ -89,6 +93,7 @@ def update_host(
         ssh_password=ssh_password,
         docker_enabled=docker_enabled,
         docker_command=docker_command,
+        sudo_password=sudo_password,
     )
     if row is None:
         return None
@@ -104,6 +109,7 @@ def update_host(
             "ssh_port",
             "docker_enabled",
             "docker_command",
+            "sudo_password",
         )
         if previous.get(field) != row.get(field)
     ]
@@ -221,33 +227,53 @@ def delete_web_service(host_id: int, web_service_id: int) -> bool:
     return ok
 
 
+def _docker_failure_hint(failures: list[str], used_sudo_password: bool) -> str | None:
+    """Map failed attempts to an i18n hint code, or None when the error is not auth-related."""
+    combined = "\n".join(failures).lower()
+    if used_sudo_password and "sorry, try again" in combined:
+        return "sudo-password-wrong"
+    if "password is required" in combined:
+        return "sudo-password-required"
+    if "permission denied" in combined:
+        return "docker-access-denied"
+    return None
+
+
 def get_host_docker(host_id: int) -> dict[str, Any] | None:
-    """Run the configured docker command over SSH and return parsed containers; None if the host does not exist."""
+    """Run the configured docker command over SSH and return parsed containers; None if the host does not exist.
+
+    When the command starts with ``sudo``, several variants are attempted (plain,
+    passwordless sudo, sudo with the host's sudo password from the General settings)
+    so that hosts with the user in the docker group, with NOPASSWD, or with a
+    configured sudo password all work without manual retries.
+    """
     host = hosts_repo.get_host(host_id)
     if host is None:
         return None
     if not host.get("docker_enabled"):
-        return {"enabled": False, "containers": [], "error": None}
+        return {"enabled": False, "containers": [], "error": None, "hint": None}
     if not (host.get("ssh_user") or "").strip():
         return {
             "enabled": True,
             "containers": [],
             "error": "SSH is not configured for this host",
+            "hint": None,
         }
     command = (host.get("docker_command") or "sudo docker ps").strip()
     hostname = host.get("address")
-    try:
-        exit_code, out, err = run_command(host, command)
-    except Exception as exc:
-        logs_repo.add_log(host_id, "error", f"Docker check failed: {exc}")
-        return {"enabled": True, "containers": [], "error": str(exc)}
-    if exit_code != 0:
-        message = (err or out or f"Command exited with code {exit_code}").strip()
-        logs_repo.add_log(host_id, "error", f"Docker check failed ({hostname}): {message}")
-        return {"enabled": True, "containers": [], "error": message}
-    containers = docker_service.parse_docker_ps(out)
-    logs_repo.add_log(host_id, "ok", f"Docker OK ({hostname}): {len(containers)} container(s)")
-    return {"enabled": True, "containers": containers, "error": None}
+    sudo_password = str(host.get("sudo_password") or "")
+    results = run_command_variants(host, command, sudo_password)
+    failures: list[str] = []
+    for label, exit_code, out, err in results:
+        if exit_code == 0:
+            containers = docker_service.parse_docker_ps(out)
+            logs_repo.add_log(host_id, "ok", f"Docker OK ({hostname}): {len(containers)} container(s)")
+            return {"enabled": True, "containers": containers, "error": None, "hint": None}
+        failures.append((err or out or f"Command exited with code {exit_code}").strip())
+    message = failures[-1] if failures else f"Docker check failed ({hostname})"
+    hint = _docker_failure_hint(failures, any(label == "sudo-pw" for label, _, _, _ in results))
+    logs_repo.add_log(host_id, "error", f"Docker check failed ({hostname}): {message}")
+    return {"enabled": True, "containers": [], "error": message, "hint": hint}
 
 
 def check_host_web_services(host_id: int) -> list[dict[str, Any]]:
