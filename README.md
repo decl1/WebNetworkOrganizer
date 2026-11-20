@@ -1,8 +1,8 @@
 # WebNetworkOrganizer
 
-Веб-приложение для управления видимой сетью: контейнеры с хостами, пинг, автообновление, логи, SSH-настройки, интерактивная консоль (xterm.js), веб-сервисы, Docker-контейнеры через SSH.
+Веб-приложение для управления видимой сетью: контейнеры с хостами, пинг, автообновление, логи, SSH-настройки, интерактивная консоль (xterm.js), веб-сервисы, Docker-контейнеры через SSH, файловый менеджер с редактором.
 
-A web app for managing your visible network: container hosts, ping, auto-refresh, logs, SSH settings, interactive console (xterm.js), web services, Docker containers over SSH.
+A web app for managing your visible network: container hosts, ping, auto-refresh, logs, SSH settings, interactive console (xterm.js), web services, Docker containers over SSH, file manager with an editor.
 
 ## Start / Запуск
 
@@ -35,8 +35,9 @@ The app exposes an MCP server over streamable HTTP at `/mcp` — statuses are al
 - Containers / хосты в контейнерах, ping-статус, auto-refresh
 - Logs / логи (poll 2s)
 - SSH: key setup, public key, ssh-copy-id hint / настройки ключей
-- Interactive console (xterm.js, PTY over WebSocket) / консоль
+- Interactive console (xterm.js, PTY over WebSocket) / консоль; "Open in console" from the file manager starts the shell in the current folder
 - Web services / веб-сервисы: URLs, status check, health
+- File manager / файловый менеджер (button next to the console): SFTP browsing with breadcrumbs, drag & drop upload, streaming download, built-in text editor window (Ctrl+S, binary and oversized files are view-only); unreadable paths fall back to the sudo attempt chain (NOPASSWD or the host sudo password) / кнопка рядом с консолью: обзор по SFTP с хлебными крошками, загрузка drag & drop, потоковое скачивание, встроенный редактор в отдельном окне (Ctrl+S, бинарные и слишком большие файлы — только просмотр); недоступные пути обрабатываются через sudo-цепочку (NOPASSWD или пароль sudo хоста)
 - Docker: enable per host + command (default `sudo docker ps`); sudo fallbacks are tried automatically (docker group, NOPASSWD, sudo password in the General section of host settings) / докер-контейнеры по SSH; sudo-варианты пробуются автоматически (группа docker, NOPASSWD, пароль sudo в общих настройках хоста)
 - SysInfo: customizable per-host console parameters (defaults: CPU, RAM, disk, temperature); each parameter supports an optional regex to extract the value from the command output (capture group 1, or the whole match); `sudo` supported via the host's sudo password (General settings) / кастомные sysinfo-параметры хоста (по умолчанию: ЦП, ОЗУ, диск, температура); у каждого параметра есть необязательный regex для извлечения значения из вывода команды (первая группа или всё найденное); `sudo` поддерживается через пароль sudo хоста (общие настройки)
 

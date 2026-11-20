@@ -158,7 +158,7 @@ def post_ssh_check(host_id: int) -> HostOut:
 
 
 @router.websocket("/ws/hosts/{host_id}/ssh")
-async def ssh_console_ws(websocket: WebSocket, host_id: int) -> None:
+async def ssh_console_ws(websocket: WebSocket, host_id: int, cwd: str = "") -> None:
     """Relay an interactive shell between the browser and the host via SSH."""
     await websocket.accept()
     host = hosts_service.get_host(host_id)
@@ -171,7 +171,7 @@ async def ssh_console_ws(websocket: WebSocket, host_id: int) -> None:
         await websocket.close()
         return
     try:
-        client, channel = ssh_service.open_shell(host)
+        client, channel = ssh_service.open_shell(host, cwd=cwd.strip() or None)
     except Exception as exc:
         await websocket.send_json({"type": "error", "message": f"Connection failed: {exc}"})
         await websocket.close()

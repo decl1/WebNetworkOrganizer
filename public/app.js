@@ -266,6 +266,11 @@ function handleContainerClick(event) {
         openHostConsole(host);
       }
       break;
+    case "host-files":
+      if (host) {
+        openHostFiles(host);
+      }
+      break;
     case "toggle-panel":
       if (host) {
         toggleHostPanel(host.id, panel);

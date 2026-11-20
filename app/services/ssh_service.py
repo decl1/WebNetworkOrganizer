@@ -151,12 +151,32 @@ def run_command_variants(
     return results
 
 
-def open_shell(host: dict[str, Any]) -> tuple[paramiko.SSHClient, paramiko.Channel]:
-    """Connect to the host and start an interactive PTY shell."""
-    client = _connect(host, 8)
+def open_shell(
+    host: dict[str, Any],
+    cwd: str | None = None,
+    timeout: int = 8,
+) -> tuple[paramiko.SSHClient, paramiko.Channel]:
+    """Connect to the host and start an interactive PTY shell (optionally in ``cwd``)."""
+    client = _connect(host, timeout)
     try:
         channel = client.invoke_shell(term="xterm-256color", width=100, height=30)
     except Exception:
         client.close()
         raise
+    if cwd:
+        channel.send(f"cd {shlex.quote(cwd)}\r")
     return client, channel
+
+
+def open_sftp(
+    host: dict[str, Any],
+    timeout: int = 8,
+) -> tuple[paramiko.SSHClient, paramiko.SFTPClient]:
+    """Connect to the host and start an SFTP session."""
+    client = _connect(host, timeout)
+    try:
+        sftp = client.open_sftp()
+    except Exception:
+        client.close()
+        raise
+    return client, sftp
