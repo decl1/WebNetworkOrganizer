@@ -15,6 +15,7 @@ from . import ssh_service
 
 READ_LIMIT = 512 * 1024
 CHUNK = 256 * 1024
+SAFE_COPY_DEPTH = 64
 
 
 class FsError(Exception):
@@ -316,7 +317,11 @@ def upload_file(
 
 
 def _read_all(handle: Any) -> bytes:
-    handle.seek(0)
+    if hasattr(handle, "seek"):
+        try:
+            handle.seek(0)
+        except Exception:
+            pass
     chunks: list[bytes] = []
     while True:
         chunk = handle.read(CHUNK)
@@ -414,3 +419,246 @@ def _close_sftp(client, sftp) -> None:
             client.close()
         except Exception:
             pass
+
+
+def rename_entry(host: dict[str, Any], raw_path: str, new_name: str) -> str:
+    """Rename a file or folder; returns the new path or raises FsError."""
+    path = resolve_path(host, raw_path)
+    if path == "/":
+        raise FsError("Cannot rename the root directory")
+    name = (new_name or "").strip().replace("\\", "/")
+    if not name or "/" in name or name in (".", ".."):
+        raise FsError(f"Invalid name: {new_name!r}")
+    target = posixpath.join(posixpath.dirname(path), name)
+    if target == path:
+        return path
+    client = None
+    sftp = None
+    try:
+        client, sftp = ssh_service.open_sftp(host)
+        try:
+            sftp.rename(path, target)
+            return target
+        except FileNotFoundError:
+            raise FsError(f"Path not found: {path}") from None
+        except Exception:
+            pass
+    finally:
+        _close_sftp(client, sftp)
+    cmd = f"mv -- {shlex.quote(path)} {shlex.quote(target)}"
+    ok, _, last_err = _run_shell_success(host, cmd, f"sudo {cmd}", timeout=30)
+    if not ok:
+        raise _shell_error(path, last_err) from None
+    return target
+
+
+def delete_paths(host: dict[str, Any], raw_paths: list[str]) -> int:
+    """Delete files/folders (recursively); returns the deleted count or raises FsError."""
+    paths: list[str] = []
+    for raw in raw_paths or []:
+        path = resolve_path(host, raw)
+        if path == "/":
+            raise FsError("Refusing to delete the root directory")
+        if path not in paths:
+            paths.append(path)
+    if not paths:
+        raise FsError("No paths selected")
+    quoted = " ".join(shlex.quote(p) for p in paths)
+    cmd = f"rm -rf -- {quoted}"
+    ok, _, last_err = _run_shell_success(host, cmd, f"sudo {cmd}", timeout=120)
+    if not ok:
+        raise _shell_error(", ".join(paths), last_err) from None
+    return len(paths)
+
+
+def make_dir(host: dict[str, Any], raw_path: str, name: str) -> str:
+    """Create a folder inside ``raw_path``; returns the new path or raises FsError."""
+    parent = resolve_path(host, raw_path)
+    value = (name or "").strip().replace("\\", "/")
+    if not value or "/" in value or value in (".", ".."):
+        raise FsError(f"Invalid name: {name!r}")
+    target = posixpath.join(parent, value)
+    cmd = f"mkdir -p {shlex.quote(target)}"
+    ok, _, last_err = _run_shell_success(host, cmd, f"sudo {cmd}", timeout=30)
+    if not ok:
+        raise _shell_error(target, last_err) from None
+    return target
+
+
+def create_archive(host: dict[str, Any], raw_paths: list[str]) -> tuple[str, int | None, Iterator[bytes]]:
+    """Pack entries into a remote tar.gz and stream it; returns (name, size, stream)."""
+    paths = [resolve_path(host, raw) for raw in raw_paths or [] if raw]
+    if not paths:
+        raise FsError("No paths selected")
+    single = len(paths) == 1
+    base = posixpath.basename(paths[0]) or "archive"
+    name = f"{base}.tar.gz" if single else f"wno-archive-{time.strftime('%Y%m%d-%H%M%S')}.tar.gz"
+    tmp = f"/tmp/wno-{time.time_ns()}.tar.gz"
+    operands: list[str] = []
+    for path in paths:
+        parent = posixpath.dirname(path) or "/"
+        basename = posixpath.basename(path) or path
+        operands.extend(["-C", shlex.quote(parent), shlex.quote(basename)])
+    cmd = f"tar czf {shlex.quote(tmp)} {' '.join(operands)}"
+    ok, _, last_err = _run_shell_success(host, cmd, f"sudo {cmd}", timeout=600)
+    if not ok:
+        raise FsError(f"Archive creation failed: {(last_err or 'tar error').strip()}") from None
+
+    def cleanup() -> None:
+        _run_shell_success(host, f"rm -f {shlex.quote(tmp)}", f"sudo rm -f {shlex.quote(tmp)}", timeout=30)
+
+    try:
+        _resolved, size, stream = download_file(host, tmp)
+    except Exception:
+        try:
+            cleanup()
+        except Exception:
+            pass
+        raise
+
+    def gen() -> Iterator[bytes]:
+        try:
+            yield from stream
+        finally:
+            try:
+                cleanup()
+            except Exception:
+                pass
+
+    return name, size, gen()
+
+
+def _path_kind(host: dict[str, Any], path: str) -> str:
+    """Return "dir" when ``path`` is a directory, "file" otherwise (no raise)."""
+    client = None
+    sftp = None
+    try:
+        client, sftp = ssh_service.open_sftp(host)
+        attrs = sftp.stat(path)
+        return "dir" if statmod.S_ISDIR(attrs.st_mode) else "file"
+    except Exception:
+        pass
+    finally:
+        _close_sftp(client, sftp)
+    cmd = f"stat -c %F {shlex.quote(path)}"
+    ok, out, _last_err = _run_shell_success(host, cmd, f"sudo {cmd}", timeout=20)
+    if ok and out.strip().startswith("directory"):
+        return "dir"
+    return "file"
+
+
+def _ensure_dir(host: dict[str, Any], path: str) -> None:
+    try:
+        list_dir(host, path)
+        return
+    except FsError:
+        pass
+    cmd = f"mkdir -p {shlex.quote(path)}"
+    ok, _, last_err = _run_shell_success(host, cmd, f"sudo {cmd}", timeout=30)
+    if not ok:
+        raise FsError(f"Cannot create the folder: {path} ({last_err.strip()})") from None
+
+
+class _StreamReader:
+    """Adapter turning a byte iterator into a read()-able upload handle."""
+
+    def __init__(self, stream: Iterator[bytes]):
+        self._stream = stream
+        self._buf = b""
+
+    def read(self, size: int) -> bytes:
+        while len(self._buf) < size:
+            try:
+                chunk = next(self._stream)
+            except StopIteration:
+                break
+            if not chunk:
+                break
+            self._buf += chunk
+        out, self._buf = self._buf[:size], self._buf[size:]
+        return out
+
+
+def copy_paths(
+    src_host: dict[str, Any],
+    dst_host: dict[str, Any],
+    raw_paths: list[str],
+    raw_target_dir: str,
+    move: bool,
+) -> int:
+    """Copy or move entries to another folder or another host; returns the entry count."""
+    src_paths = [resolve_path(src_host, raw) for raw in raw_paths or [] if raw]
+    if not src_paths:
+        raise FsError("No paths selected")
+    target = resolve_path(dst_host, raw_target_dir)
+    for path in src_paths:
+        if path == "/":
+            raise FsError("Cannot move or copy the root directory")
+        if path == target or target.startswith(path.rstrip("/") + "/"):
+            raise FsError(f"Cannot copy or move a folder into itself: {path}")
+    same_host = src_host.get("id") == dst_host.get("id")
+    if same_host:
+        for path in src_paths:
+            _shell_copy_entry(src_host, path, target, move)
+    else:
+        visited: set[str] = set()
+        for path in src_paths:
+            _copy_entry_recursive(src_host, dst_host, path, target, visited, 0)
+        if move:
+            delete_paths(src_host, src_paths)
+    return len(src_paths)
+
+
+def _shell_copy_entry(host: dict[str, Any], src: str, dst_dir: str, move: bool) -> None:
+    """Move or copy one entry on the same host (a directory landing on an existing
+    folder nests into it, like a file explorer would)."""
+    dst = posixpath.join(dst_dir, posixpath.basename(src))
+    if _path_kind(host, dst) == "dir":
+        dst = posixpath.join(dst, posixpath.basename(src))
+    if dst == src:
+        return
+    if move:
+        cmd = f"mv -- {shlex.quote(src)} {shlex.quote(dst)}"
+        ok, _, last_err = _run_shell_success(host, cmd, f"sudo {cmd}", timeout=60)
+        if ok:
+            return
+        copy_cmd = f"cp -a -- {shlex.quote(src)} {shlex.quote(dst)}"
+        ok, _, last_err = _run_shell_success(host, copy_cmd, f"sudo {copy_cmd}", timeout=600)
+        if not ok:
+            raise FsError(f"Move failed: {(last_err or 'error').strip()}") from None
+        delete_paths(host, [src])
+        return
+    copy_cmd = f"cp -a -- {shlex.quote(src)} {shlex.quote(dst)}"
+    ok, _, last_err = _run_shell_success(host, copy_cmd, f"sudo {copy_cmd}", timeout=600)
+    if not ok:
+        raise FsError(f"Copy failed: {(last_err or 'error').strip()}") from None
+
+
+def _copy_entry_recursive(
+    src_host: dict[str, Any],
+    dst_host: dict[str, Any],
+    src_path: str,
+    dst_dir: str,
+    visited: set[str],
+    depth: int,
+) -> None:
+    """Copy a file or an entire folder tree between two different hosts."""
+    if depth > SAFE_COPY_DEPTH or src_path in visited:
+        return
+    visited.add(src_path)
+    kind = _path_kind(src_host, src_path)
+    base = posixpath.basename(src_path)
+    if kind == "dir":
+        dst = posixpath.join(dst_dir, base)
+        if _path_kind(dst_host, dst) != "dir":
+            _ensure_dir(dst_host, dst)
+        entries = list_dir(src_host, src_path)["entries"]
+        for entry in entries:
+            _copy_entry_recursive(src_host, dst_host, entry["path"], dst, visited, depth + 1)
+        return
+    dest_dir = dst_dir
+    probe = posixpath.join(dst_dir, base)
+    if _path_kind(dst_host, probe) == "dir":
+        dest_dir = probe
+    _resolved, _size, stream = download_file(src_host, src_path)
+    upload_file(dst_host, dest_dir, base, _StreamReader(stream))
