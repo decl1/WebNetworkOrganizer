@@ -1350,6 +1350,13 @@ body.win-resizing {
   white-space: nowrap;
 }
 
+.fs-list.fs-drop-bg {
+  outline: 2px dashed var(--accent);
+  outline-offset: -4px;
+  background: var(--accent-soft);
+  border-radius: 6px;
+}
+
 .fs-menu {
   position: absolute;
   z-index: 1000;
@@ -1462,15 +1469,29 @@ body.win-resizing {
   white-space: pre-wrap;
 }
 
+.fs-statusbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-top: 1px solid var(--border);
+}
+
 .fs-status {
+  flex: 1;
+  min-width: 0;
   padding: 6px 12px;
   font-size: 12px;
   color: var(--muted);
-  border-top: 1px solid var(--border);
-  flex-shrink: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.fs-cancel {
+  flex: none;
+  margin-right: 8px;
+  font-size: 12px;
+  padding: 2px 10px;
 }
 
 .fs-status.ok {
@@ -1479,6 +1500,10 @@ body.win-resizing {
 
 .fs-status.error {
   color: #f85149;
+}
+
+.win-body > .fs-status {
+  flex: none;
 }
 
 .fs-editor-path {
