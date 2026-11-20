@@ -26,10 +26,7 @@ function webServiceRowHtml(service, address) {
         ? `${t("wsFail")}: ${service.error || ""}`
         : t("wsUnknown");
   const openUrl = `http://${address}:${service.port}/`;
-  const openButton =
-    status === "ok"
-      ? `<a class="ws-open" href="${escapeHtml(openUrl)}" target="_blank" rel="noopener" title="${t("wsOpen")}">${ICONS.chevronRight}</a>`
-      : "";
+  const openButton = `<a class="ws-open" href="${escapeHtml(openUrl)}" target="_blank" rel="noopener" title="${t("wsOpen")}">${ICONS.chevronRight}</a>`
   return `<div class="ws-row">
       <span class="ping-dot" data-kind="ws" data-status="${status}" title="${status === "unknown" ? "" : title}"></span>
       <span class="ws-name" title="${title}">${escapeHtml(service.name)}</span>
