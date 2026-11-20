@@ -8,6 +8,7 @@
   --muted: #8b949e;
   --accent: #2f81f7;
   --accent-hover: #388bfd;
+  --accent-soft: rgba(47, 129, 247, 0.12);
   --gray: #57606a;
   --docker: #2496ed;
   --docker-bg: rgba(36, 150, 237, 0.14);
@@ -24,6 +25,7 @@
   --muted: #656d76;
   --accent: #0969da;
   --accent-hover: #0550ae;
+  --accent-soft: rgba(9, 105, 218, 0.1);
   --gray: #8c959f;
   --docker: #1d63ed;
   --docker-bg: rgba(29, 99, 237, 0.1);
@@ -1229,6 +1231,200 @@ body.win-resizing {
 
 .console-term .xterm-viewport {
   background: #101418;
+}
+
+.fs-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+
+.fs-console-label {
+  margin-left: 6px;
+  font-size: 12px;
+}
+
+.fs-path {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  overflow: hidden;
+  white-space: nowrap;
+  font-size: 12.5px;
+}
+
+.fs-crumb {
+  background: none;
+  border: none;
+  padding: 2px 5px;
+  border-radius: 4px;
+  color: var(--accent);
+  font-size: 12.5px;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.fs-crumb:hover {
+  background: var(--card);
+}
+
+.fs-crumb-sep {
+  color: var(--muted);
+  flex-shrink: 0;
+}
+
+.fs-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 4px 8px;
+}
+
+.fs-list.fs-drag {
+  outline: 2px dashed var(--accent);
+  outline-offset: -4px;
+  background: var(--accent-soft);
+}
+
+.fs-row {
+  display: grid;
+  grid-template-columns: 1fr 90px 150px 44px;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  border-radius: 6px;
+}
+
+.fs-row[data-fs-open] {
+  cursor: pointer;
+}
+
+.fs-row:hover {
+  background: var(--card);
+}
+
+.fs-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+}
+
+.fs-name-dir {
+  color: var(--text);
+}
+
+.fs-icon {
+  display: inline-flex;
+  flex-shrink: 0;
+}
+
+.fs-icon svg {
+  width: 14px;
+  height: 14px;
+  fill: var(--muted);
+}
+
+.fs-name-dir .fs-icon svg {
+  fill: var(--accent);
+}
+
+.fs-size,
+.fs-time {
+  font-size: 12px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fs-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.fs-actions .btn.icon {
+  width: 24px;
+  height: 24px;
+}
+
+.fs-actions .btn.icon svg {
+  width: 12px;
+  height: 12px;
+}
+
+.fs-empty {
+  color: var(--muted);
+  text-align: center;
+  padding: 28px 0;
+}
+
+.fs-error {
+  color: #f85149;
+  padding: 12px;
+  font-size: 12.5px;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.fs-status {
+  padding: 6px 12px;
+  font-size: 12px;
+  color: var(--muted);
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fs-status.ok {
+  color: #3fb950;
+}
+
+.fs-status.error {
+  color: #f85149;
+}
+
+.fs-editor-path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12.5px;
+  color: var(--muted);
+  font-family: "Cascadia Mono", Consolas, monospace;
+}
+
+.fs-editor {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  resize: none;
+  border: none;
+  outline: none;
+  background: var(--bg);
+  color: var(--text);
+  padding: 10px 12px;
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-size: 12.5px;
+  line-height: 1.55;
+  tab-size: 4;
+}
+
+.fs-editor:disabled {
+  opacity: 0.65;
 }
 
 @media (max-width: 640px) {

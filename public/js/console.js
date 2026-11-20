@@ -1,7 +1,7 @@
 "use strict";
 
 class ConsoleWindow extends BaseWindow {
-  constructor(host) {
+  constructor(host, cwd) {
     super({
       id: `console-${host.id}`,
       title: `${t("ssh")} · ${host.name}`,
@@ -10,6 +10,7 @@ class ConsoleWindow extends BaseWindow {
       height: 440,
     });
     this.hostId = host.id;
+    this.cwd = cwd || null;
     this.ws = null;
     this._resizeTimer = null;
 
@@ -56,7 +57,11 @@ class ConsoleWindow extends BaseWindow {
 
   connect() {
     const proto = location.protocol === "https:" ? "wss:" : "ws:";
-    const ws = new WebSocket(`${proto}//${location.host}/ws/hosts/${this.hostId}/ssh`);
+    let url = `${proto}//${location.host}/ws/hosts/${this.hostId}/ssh`;
+    if (this.cwd) {
+      url += `?cwd=${encodeURIComponent(this.cwd)}`;
+    }
+    const ws = new WebSocket(url);
     ws.binaryType = "arraybuffer";
     this.ws = ws;
     ws.onopen = () => {
@@ -122,11 +127,15 @@ class ConsoleWindow extends BaseWindow {
   };
 }
 
-function openHostConsole(host) {
+function openHostConsole(host, cwd) {
   const existing = WindowManager.get(`console-${host.id}`);
   if (existing) {
-    existing.restore();
-    return;
+    if (cwd !== undefined && cwd !== null) {
+      existing.close();
+    } else {
+      existing.restore();
+      return;
+    }
   }
-  new ConsoleWindow(host);
+  new ConsoleWindow(host, cwd || null);
 }

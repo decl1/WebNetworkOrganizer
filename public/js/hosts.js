@@ -248,6 +248,7 @@ function hostCardHtml(host) {
           <button class="btn icon" data-action="host-settings" data-i18n-title="hostSettings" title="${t("hostSettings")}">${ICONS.gear}</button>
           <button class="btn icon" data-action="host-logs" data-i18n-title="logs" title="${t("logs")}">${ICONS.logs}</button>
           <button class="btn icon" data-action="host-terminal" data-i18n-title="terminal" title="${t("terminal")}">${ICONS.terminal}</button>
+          <button class="btn icon" data-action="host-files" data-i18n-title="files" title="${t("files")}">${ICONS.folder}</button>
           ${hostUpdatedHtml(host)}
         </div>
       </div>
