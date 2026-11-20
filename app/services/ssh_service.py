@@ -1,6 +1,7 @@
 """SSH connectivity: organizer key management, checks and interactive shells."""
 
 import os
+import shlex
 from typing import Any
 
 import paramiko
@@ -105,6 +106,49 @@ def run_command(host: dict[str, Any], command: str, timeout: int = 15) -> tuple[
     finally:
         if client is not None:
             client.close()
+
+
+def command_attempts(command: str, sudo_password: str) -> list[tuple[str, str]]:
+    """Build (label, command) variants to try for a command that may need sudo.
+
+    - "as-is": the command verbatim when it does not start with ``sudo``;
+    - "plain": the command without the leading ``sudo`` (user in the docker group);
+    - "sudo-n": passwordless sudo (`sudo -n -p ''`) for NOPASSWD setups;
+    - "sudo-pw": sudo with the given sudo password piped via `sudo -S -p ''`.
+    """
+    command = (command or "").strip()
+    if not command.startswith("sudo "):
+        return [("as-is", command)]
+    rest = command[5:].lstrip()
+    attempts: list[tuple[str, str]] = [("plain", rest), ("sudo-n", f"sudo -n -p '' {rest}")]
+    password = sudo_password.strip()
+    if password:
+        attempts.append(("sudo-pw", f"printf '%s\\n' {shlex.quote(password)} | sudo -S -p '' {rest}"))
+    return attempts
+
+
+def run_command_variants(
+    host: dict[str, Any],
+    command: str,
+    sudo_password: str,
+    timeout: int = 15,
+) -> list[tuple[str, int, str, str]]:
+    """Run a command over SSH, trying each variant in order until one exits with code 0.
+
+    Returns the list of attempts made as (label, exit code, stdout, stderr);
+    ``-1`` as the exit code marks a connection/execution failure.
+    """
+    results: list[tuple[str, int, str, str]] = []
+    for label, variant in command_attempts(command, sudo_password):
+        try:
+            exit_code, out, err = run_command(host, variant, timeout)
+        except Exception as exc:
+            results.append((label, -1, "", str(exc)))
+        else:
+            results.append((label, exit_code, out, err))
+            if exit_code == 0:
+                break
+    return results
 
 
 def open_shell(host: dict[str, Any]) -> tuple[paramiko.SSHClient, paramiko.Channel]:

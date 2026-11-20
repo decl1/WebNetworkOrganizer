@@ -77,7 +77,19 @@ function applyPatch(patch) {
 }
 
 function openSettings() {
+  $("#settings-status").textContent = "";
+  $("#settings-status").className = "settings-status";
   $("#settings-overlay").classList.remove("hidden");
+}
+
+function setSettingsSection(section) {
+  const overlay = $("#settings-overlay");
+  overlay.querySelectorAll(".settings-nav-item").forEach((item) => {
+    item.classList.toggle("active", item.dataset.section === section);
+  });
+  overlay.querySelectorAll(".settings-section").forEach((item) => {
+    item.style.display = item.id === `settings-section-${section}` ? "" : "none";
+  });
 }
 
 function closeSettings() {
@@ -324,6 +336,13 @@ function init() {
     const patch = { language: event.target.value };
     applyPatch(patch);
     saveSettings(patch);
+  });
+
+  $("#settings-overlay").querySelectorAll(".settings-nav-item").forEach((item) => {
+    item.addEventListener("click", (event) => {
+      event.preventDefault();
+      setSettingsSection(item.dataset.section);
+    });
   });
 
   loadSettings().catch((error) => setStatus(`${t("loadError")} ${error}`, "error"));

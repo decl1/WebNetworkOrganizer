@@ -37,6 +37,17 @@ CREATE TABLE IF NOT EXISTS hosts (
     ssh_error TEXT,
     docker_enabled INTEGER NOT NULL DEFAULT 0,
     docker_command TEXT NOT NULL DEFAULT 'sudo docker ps',
+    sudo_password TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS sysinfo_params (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    host_id INTEGER NOT NULL REFERENCES hosts(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    command TEXT NOT NULL,
+    parse TEXT NOT NULL DEFAULT '',
+    position INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -132,7 +143,45 @@ _MIGRATIONS = [
         "docker_command",
         "ALTER TABLE hosts ADD COLUMN docker_command TEXT NOT NULL DEFAULT 'sudo docker ps'",
     ),
+    (
+        "hosts",
+        "sudo_password",
+        "ALTER TABLE hosts ADD COLUMN sudo_password TEXT NOT NULL DEFAULT ''",
+    ),
+    (
+        "sysinfo_params",
+        "parse",
+        "ALTER TABLE sysinfo_params ADD COLUMN parse TEXT NOT NULL DEFAULT ''",
+    ),
 ]
+
+
+def _migrate_legacy_docker_sudo_password(conn: sqlite3.Connection) -> None:
+    """Move the legacy per-host sudo password into the hosts.sudo_password column, then drop the old one."""
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(hosts)")}
+    if "docker_sudo_password" not in columns:
+        return
+    try:
+        conn.execute(
+            "UPDATE hosts SET sudo_password = docker_sudo_password WHERE docker_sudo_password != ''"
+        )
+    except sqlite3.OperationalError:
+        pass
+    try:
+        conn.execute("ALTER TABLE hosts DROP COLUMN docker_sudo_password")
+    except sqlite3.OperationalError:
+        pass
+
+
+def _migrate_legacy_settings_sudo_password(conn: sqlite3.Connection) -> None:
+    """Move the previous global-settings sudo password into every host, then drop the setting."""
+    row = conn.execute("SELECT value FROM settings WHERE key = 'sudo_password'").fetchone()
+    if row is not None and (row["value"] or "").strip():
+        conn.execute(
+            "UPDATE hosts SET sudo_password = ? WHERE sudo_password = ''",
+            (str(row["value"]),),
+        )
+    conn.execute("DELETE FROM settings WHERE key = 'sudo_password'")
 
 
 @contextmanager
@@ -157,3 +206,5 @@ def init_db() -> None:
             existing = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
             if column not in existing:
                 conn.execute(alter)
+        _migrate_legacy_docker_sudo_password(conn)
+        _migrate_legacy_settings_sudo_password(conn)

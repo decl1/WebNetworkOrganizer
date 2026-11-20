@@ -9,7 +9,7 @@ from fastapi.staticfiles import StaticFiles
 from .config import PUBLIC_DIR
 from .db.database import init_db
 from .mcp import build_mcp_handlers
-from .routers import containers, health, hosts, settings
+from .routers import containers, health, hosts, settings, sysinfo
 from .services.snapshot import write_status_snapshot
 
 mcp_handlers, mcp_session = build_mcp_handlers()
@@ -27,6 +27,7 @@ app = FastAPI(title="WebNetworkOrganizer", lifespan=lifespan)
 
 app.include_router(containers.router)
 app.include_router(hosts.router)
+app.include_router(sysinfo.router)
 app.include_router(settings.router)
 app.include_router(health.router)
 

@@ -45,6 +45,9 @@ def post_host(container_id: int, body: HostIn) -> HostOut:
             ssh_user=body.ssh_user,
             ssh_port=body.ssh_port,
             ssh_password=body.ssh_password,
+            docker_enabled=int(body.docker_enabled) if body.docker_enabled else 0,
+            docker_command=body.docker_command,
+            sudo_password=body.sudo_password,
         )
     except ContainerNotFoundError:
         raise HTTPException(status_code=404, detail="Container not found") from None
@@ -65,6 +68,7 @@ def patch_host(host_id: int, body: HostPatch) -> HostOut:
         ssh_password=body.ssh_password,
         docker_enabled=int(body.docker_enabled) if body.docker_enabled is not None else None,
         docker_command=body.docker_command,
+        sudo_password=body.sudo_password,
     )
     if row is None:
         raise HTTPException(status_code=404, detail="Host not found")

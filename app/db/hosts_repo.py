@@ -23,12 +23,13 @@ _COLUMNS = (
     "ssh_error",
     "docker_enabled",
     "docker_command",
+    "sudo_password",
     "created_at",
 )
 _SELECT = (
     "SELECT id, container_id, name, address, os, auto_refresh, ping_status, ping_at, ping_ms, "
     "ssh_auth, ssh_user, ssh_port, ssh_password, ssh_status, ssh_at, ssh_error, "
-    "docker_enabled, docker_command, created_at "
+    "docker_enabled, docker_command, sudo_password, created_at "
     "FROM hosts"
 )
 
@@ -63,6 +64,7 @@ def create_host(
     ssh_password: str = "",
     docker_enabled: int = 0,
     docker_command: str = "sudo docker ps",
+    sudo_password: str = "",
 ) -> dict[str, Any]:
     """Create a host in a container and return it."""
     with connect() as conn:
@@ -70,8 +72,8 @@ def create_host(
         if container is None:
             raise ContainerNotFoundError
         cursor = conn.execute(
-            "INSERT INTO hosts (container_id, name, address, os, auto_refresh, ssh_auth, ssh_user, ssh_port, ssh_password, docker_enabled, docker_command) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO hosts (container_id, name, address, os, auto_refresh, ssh_auth, ssh_user, ssh_port, ssh_password, docker_enabled, docker_command, sudo_password) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 container_id,
                 name,
@@ -84,6 +86,7 @@ def create_host(
                 ssh_password,
                 docker_enabled,
                 docker_command,
+                sudo_password,
             ),
         )
         row = conn.execute(_SELECT + " WHERE id = ?", (cursor.lastrowid,)).fetchone()
@@ -104,6 +107,7 @@ def update_host(
     ssh_password: str | None = None,
     docker_enabled: int | None = None,
     docker_command: str | None = None,
+    sudo_password: str | None = None,
 ) -> dict[str, Any] | None:
     """Update a host's fields and return it, or None if it does not exist."""
     with connect() as conn:
@@ -131,9 +135,11 @@ def update_host(
             current["docker_enabled"] = docker_enabled
         if docker_command is not None:
             current["docker_command"] = docker_command
+        if sudo_password is not None:
+            current["sudo_password"] = sudo_password
         conn.execute(
             "UPDATE hosts SET name = ?, address = ?, os = ?, auto_refresh = ?, ssh_auth = ?, ssh_user = ?, "
-            "ssh_port = ?, ssh_password = ?, docker_enabled = ?, docker_command = ? WHERE id = ?",
+            "ssh_port = ?, ssh_password = ?, docker_enabled = ?, docker_command = ?, sudo_password = ? WHERE id = ?",
             (
                 current["name"],
                 current["address"],
@@ -145,6 +151,7 @@ def update_host(
                 current["ssh_password"],
                 current["docker_enabled"],
                 current["docker_command"],
+                current["sudo_password"],
                 host_id,
             ),
         )

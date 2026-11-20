@@ -25,6 +25,7 @@ class HostIn(BaseModel):
     ssh_password: str = Field(default="", max_length=500)
     docker_enabled: bool = False
     docker_command: str = Field(default="sudo docker ps", max_length=500)
+    sudo_password: str = Field(default="", max_length=500)
 
     @field_validator("name")
     @classmethod
@@ -57,6 +58,11 @@ class HostIn(BaseModel):
     def _normalize_docker_command(cls, value: str) -> str:
         return value.strip()
 
+    @field_validator("sudo_password")
+    @classmethod
+    def _normalize_sudo_password(cls, value: str) -> str:
+        return value.strip()
+
 
 class HostPatch(BaseModel):
     """Partial host update: only the provided fields are changed."""
@@ -71,6 +77,7 @@ class HostPatch(BaseModel):
     ssh_password: str | None = Field(default=None, max_length=500)
     docker_enabled: bool | None = None
     docker_command: str | None = Field(default=None, max_length=500)
+    sudo_password: str | None = Field(default=None, max_length=500)
 
     @field_validator("name")
     @classmethod
@@ -105,6 +112,11 @@ class HostPatch(BaseModel):
     @field_validator("docker_command")
     @classmethod
     def _normalize_docker_command(cls, value: str | None) -> str | None:
+        return value.strip() if value is not None else None
+
+    @field_validator("sudo_password")
+    @classmethod
+    def _normalize_sudo_password(cls, value: str | None) -> str | None:
         return value.strip() if value is not None else None
 
     @field_validator("name")
@@ -201,6 +213,7 @@ class HostOut(BaseModel):
     ssh_error: str | None = None
     docker_enabled: bool = False
     docker_command: str = "sudo docker ps"
+    sudo_password: str = ""
     web_services: list[WebServiceOut] = []
     created_at: str
 
@@ -219,6 +232,7 @@ class DockerOut(BaseModel):
     enabled: bool
     containers: list[DockerContainerOut] = []
     error: str | None = None
+    hint: str | None = None
 
 
 class LogOut(BaseModel):
