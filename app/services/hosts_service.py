@@ -6,6 +6,7 @@ from typing import Any
 from ..db import hosts_repo, logs_repo, web_services_repo
 from . import docker_service
 from .netcheck import ping_host
+from .snapshot import write_status_snapshot
 from .ssh_service import check_ssh, run_command
 from .webcheck import check_health
 
@@ -55,6 +56,7 @@ def create_host(
         ssh_password=ssh_password,
     )
     logs_repo.add_log(row["id"], "info", "Host created")
+    write_status_snapshot()
     return row
 
 
@@ -109,12 +111,16 @@ def update_host(
         changed.append("ssh_password")
     if changed:
         logs_repo.add_log(host_id, "info", f"Host updated: {', '.join(changed)}")
+    write_status_snapshot()
     return row
 
 
 def delete_host(host_id: int) -> bool:
     """Delete a host by id; True if it existed."""
-    return hosts_repo.delete_host(host_id)
+    ok = hosts_repo.delete_host(host_id)
+    if ok:
+        write_status_snapshot()
+    return ok
 
 
 def check_host_ssh(host_id: int) -> dict[str, Any] | None:
@@ -157,6 +163,7 @@ def refresh_host(host_id: int) -> dict[str, Any] | None:
             logs_repo.add_log(host_id, "error", f"Ping failed: {result['error']}")
     check_host_ssh(host_id)
     check_host_web_services(host_id)
+    write_status_snapshot()
     return get_host(host_id)
 
 
@@ -174,6 +181,7 @@ def create_web_service(host_id: int, name: str, port: int, health_url: str) -> d
     """Create a web service for a host and log the event."""
     row = web_services_repo.create_web_service(host_id, name, port, health_url)
     logs_repo.add_log(host_id, "info", f"Web service added: {name} (:{port})")
+    write_status_snapshot()
     return row
 
 
@@ -197,6 +205,7 @@ def update_web_service(
     ]
     if changed:
         logs_repo.add_log(row["host_id"], "info", f"Web service updated: {', '.join(changed)}")
+    write_status_snapshot()
     return row
 
 
@@ -208,6 +217,7 @@ def delete_web_service(host_id: int, web_service_id: int) -> bool:
     ok = web_services_repo.delete_web_service(web_service_id)
     if ok:
         logs_repo.add_log(host_id, "info", f"Web service removed: {service['name']}")
+        write_status_snapshot()
     return ok
 
 

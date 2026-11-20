@@ -14,6 +14,22 @@ Web UI: <http://localhost:8991>
 
 Stack: FastAPI + SQLite + vanilla JS. Code: EN, UI: EN/RU (`public/js/i18n.js`).
 
+## MCP / MCP-сервер
+
+The app exposes an MCP server over streamable HTTP at `/mcp` — statuses are also written to `data/hosts_status.json` after every refresh. Tools: `get_hosts`, `get_host`, `get_hosts_by_ping_status`, `refresh_host`, `docker_containers`; resource `wno://snapshot`.
+
+Приложение отдаёт MCP-сервер по streamable HTTP на `/mcp`; снапшот статусов пишется в `data/hosts_status.json` после каждого обновления. Инструменты: `get_hosts`, `get_host`, `get_hosts_by_ping_status`, `refresh_host`, `docker_containers`; ресурс `wno://snapshot`.
+
+```json
+{
+  "mcpServers": {
+    "webnetworkorganizer": {
+      "url": "http://localhost:8991/mcp"
+    }
+  }
+}
+```
+
 ## Main Features / Возможности
 
 - Containers / хосты в контейнерах, ping-статус, auto-refresh

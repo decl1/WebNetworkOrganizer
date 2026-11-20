@@ -145,6 +145,43 @@ function hostSshBarHtml(host) {
     </div>`;
 }
 
+function formatHostUpdated(host) {
+  const ts = host.ping_at;
+  const pad = (n) => String(n).padStart(2, "0");
+  if (!ts) {
+    return { text: t("never"), local: null };
+  }
+  const date = new Date(ts.replace(" ", "T") + "Z");
+  if (Number.isNaN(date.getTime())) {
+    return { text: ts, local: null };
+  }
+  const localTime = `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+  const localDate = `${pad(date.getDate())}.${pad(date.getMonth() + 1)}.${date.getFullYear()}`;
+  const now = new Date();
+  const sameDay =
+    date.getFullYear() === now.getFullYear() &&
+    date.getMonth() === now.getMonth() &&
+    date.getDate() === now.getDate();
+  return { text: sameDay ? localTime : `${localDate} ${localTime}`, local: `${localDate} ${localTime}` };
+}
+
+function hostUpdatedHtml(host) {
+  const info = formatHostUpdated(host);
+  const title = info.local ? `${t("updated")}: ${info.local}` : `${t("updated")}: ${info.text}`;
+  return `<span class="host-updated" title="${escapeHtml(title)}">${ICONS.clock}<span class="host-updated-text">${escapeHtml(info.text)}</span></span>`;
+}
+
+function updateHostUpdated(host) {
+  const card = document.querySelector(`.host-card[data-host-id="${host.id}"]`);
+  if (!card) {
+    return;
+  }
+  const label = card.querySelector(".host-updated");
+  if (label) {
+    label.outerHTML = hostUpdatedHtml(host);
+  }
+}
+
 function hostCardHtml(host) {
   return `
     <div class="host-card" data-host-id="${host.id}">
@@ -166,6 +203,7 @@ function hostCardHtml(host) {
           <button class="btn icon" data-action="host-settings" data-i18n-title="hostSettings" title="${t("hostSettings")}">${ICONS.gear}</button>
           <button class="btn icon" data-action="host-logs" data-i18n-title="logs" title="${t("logs")}">${ICONS.logs}</button>
           <button class="btn icon" data-action="host-terminal" data-i18n-title="terminal" title="${t("terminal")}">${ICONS.terminal}</button>
+          ${hostUpdatedHtml(host)}
         </div>
       </div>
       <div class="host-tabs">
@@ -260,6 +298,7 @@ async function refreshHost(hostId, silent = false) {
       updateHostPingDot(host);
       updateHostSshBar(host);
       updateHostWebServices(host);
+      updateHostUpdated(host);
     }
   } catch (error) {
     if (silent) {
