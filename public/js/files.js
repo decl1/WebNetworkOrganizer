@@ -1,6 +1,79 @@
 "use strict";
 
 const FS_DRAG_MIME = "application/x-wno-fs";
+let activeFsDrag = null;
+
+function collectDropEntries(dataTransfer) {
+  return new Promise((resolve) => {
+    const uploads = [];
+    let pending = 0;
+    const settled = () => {
+      if (pending === 0) {
+        resolve(uploads.length > 0 ? uploads : null);
+      }
+    };
+    const walk = (entry, prefix) => {
+      if (!entry) {
+        return;
+      }
+      if (entry.isFile) {
+        pending += 1;
+        entry.file(
+          (file) => {
+            uploads.push({ file, rel: prefix ? `${prefix}/${file.name}` : file.name });
+            pending -= 1;
+            settled();
+          },
+          () => {
+            pending -= 1;
+            settled();
+          },
+        );
+      } else if (entry.isDirectory) {
+        pending += 1;
+        const reader = entry.createReader();
+        const read = () => {
+          reader.readEntries(
+            (batch) => {
+              if (batch.length === 0) {
+                pending -= 1;
+                settled();
+                return;
+              }
+              const sub = prefix ? `${prefix}/${entry.name}` : entry.name;
+              batch.forEach((child) => walk(child, sub));
+              read();
+            },
+            () => {
+              pending -= 1;
+              settled();
+            },
+          );
+        };
+        read();
+      }
+    };
+    const items = Array.from(dataTransfer.items || []);
+    let usedEntries = false;
+    items.forEach((item) => {
+      if (item.kind !== "file") {
+        return;
+      }
+      if (typeof item.webkitGetAsEntry === "function") {
+        const entry = item.webkitGetAsEntry();
+        if (entry) {
+          usedEntries = true;
+          walk(entry, "");
+        }
+      }
+    });
+    if (!usedEntries) {
+      resolve(Array.from(dataTransfer.files || []).map((file) => ({ file, rel: file.name })));
+      return;
+    }
+    settled();
+  });
+}
 
 function formatFileSize(bytes) {
   if (!Number.isFinite(bytes) || bytes <= 0) {
@@ -49,6 +122,9 @@ class FileManagerWindow extends BaseWindow {
     this._selected = new Set();
     this._lastIndex = -1;
     this._dropRow = null;
+    this._reloadSeq = 0;
+    this._activeOp = null;
+    this._uploadCancelled = false;
   }
 
   createContent() {
@@ -60,7 +136,10 @@ class FileManagerWindow extends BaseWindow {
         <div class="fs-path" data-fs-role="path"></div>
       </div>
       <div class="fs-list" data-fs-role="list"></div>
-      <div class="fs-status" data-fs-role="status"></div>
+      <div class="fs-statusbar">
+        <div class="fs-status" data-fs-role="status"></div>
+        <button type="button" class="btn fs-cancel" data-fs-role="cancel" hidden></button>
+      </div>
       <div class="fs-menu" data-fs-role="menu" hidden></div>
       <div class="fs-modal-backdrop" data-fs-role="mbackdrop" hidden>
         <div class="fs-modal">
@@ -76,6 +155,9 @@ class FileManagerWindow extends BaseWindow {
     this.pathEl = this.body.querySelector("[data-fs-role='path']");
     this.listEl = this.body.querySelector("[data-fs-role='list']");
     this.statusEl = this.body.querySelector("[data-fs-role='status']");
+    this.cancelBtn = this.body.querySelector("[data-fs-role='cancel']");
+    this.cancelBtn.textContent = t("fsCancel");
+    this.cancelBtn.addEventListener("click", () => this._cancelOperation());
     this.menuEl = this.body.querySelector("[data-fs-role='menu']");
     this.modalBackdrop = this.body.querySelector("[data-fs-role='mbackdrop']");
     this.modalTitle = this.body.querySelector("[data-fs-role='mtitle']");
@@ -120,16 +202,88 @@ class FileManagerWindow extends BaseWindow {
     this.statusEl.className = "fs-status" + (kind ? ` ${kind}` : "");
   }
 
+  _newOpToken() {
+    return crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  }
+
+  _beginOp(abortFn, token, hostId) {
+    this._activeOp = { abort: abortFn, token, hostId };
+    this.cancelBtn.hidden = false;
+  }
+
+  _endOp() {
+    this._activeOp = null;
+    this.cancelBtn.hidden = true;
+    this._stopProgressPoll();
+  }
+
+  _stopProgressPoll() {
+    if (this._progressTimer) {
+      clearInterval(this._progressTimer);
+      this._progressTimer = null;
+    }
+  }
+
+  _pollCopyProgress(token, hostId) {
+    this._stopProgressPoll();
+    const timer = setInterval(async () => {
+      if (!this._activeOp || this._activeOp.token !== token) {
+        this._stopProgressPoll();
+        return;
+      }
+      try {
+        const progress = await api(`/api/hosts/${hostId}/fs/progress?token=${encodeURIComponent(token)}`);
+        if (!progress || progress.error) {
+          return;
+        }
+        const name = progress.current ? String(progress.current).split("/").pop() : "";
+        const labels = [];
+        if (typeof progress.percent === "number") {
+          labels.push(`${progress.percent}%`);
+        }
+        if (name) {
+          labels.push(name);
+        }
+        const errorCount = Array.isArray(progress.errors) ? progress.errors.length : 0;
+        if (errorCount > 0) {
+          labels.push(t("fsErrors").replace("{count}", String(errorCount)));
+        }
+        this._setStatus(`${t("fsCopying")} ${labels.join(" · ")}`.trim());
+      } catch (error) {
+        // best-effort polling: keep the last known status
+      }
+    }, 600);
+    this._progressTimer = timer;
+  }
+
+  _cancelOperation() {
+    const op = this._activeOp;
+    this._endOp();
+    if (op) {
+      if (op.token) {
+        api(`/api/hosts/${op.hostId || this.host.id}/fs/cancel`, {
+          method: "POST",
+          body: JSON.stringify({ token: op.token }),
+        }).catch(() => {});
+      }
+      op.abort();
+    }
+  }
+
   async reload() {
     if (this.minimized) {
       return;
     }
+    const seq = ++this._reloadSeq;
     this._setStatus("");
     this._selected = new Set();
     this._lastIndex = -1;
     this.listEl.innerHTML = `<p class="fs-empty">${t("sysInfoLoading")}</p>`;
     try {
       const result = await api(`/api/hosts/${this.host.id}/fs/list?path=${encodeURIComponent(this.cwd)}`);
+      if (seq !== this._reloadSeq) {
+        return;
+      }
       if (result.error) {
         this._showError(result.error);
         return;
@@ -137,6 +291,9 @@ class FileManagerWindow extends BaseWindow {
       this.cwd = result.path;
       this._render(result.entries);
     } catch (error) {
+      if (seq !== this._reloadSeq) {
+        return;
+      }
       this._showError(`${t("fsLoadError")} ${String(error)}`);
     }
   }
@@ -498,50 +655,75 @@ class FileManagerWindow extends BaseWindow {
   async _uploadTo(files, targetDir) {
     let uploaded = 0;
     let failed = 0;
-    for (const file of files) {
-      const ok = await this._uploadOne(file, targetDir);
-      if (ok) {
+    this._uploadCancelled = false;
+    for (const item of files) {
+      if (this._uploadCancelled) {
+        break;
+      }
+      const outcome = await this._uploadOne(item, targetDir);
+      if (outcome === "cancelled") {
+        this._uploadCancelled = true;
+        break;
+      }
+      if (outcome) {
         uploaded += 1;
       } else {
         failed += 1;
       }
     }
     await this.reload();
-    if (uploaded > 0 && failed === 0) {
+    if (this._uploadCancelled) {
+      this._setStatus(t("fsCancelled"), "");
+    } else if (uploaded > 0 && failed === 0) {
       this._setStatus(t("fsUploaded").replace("{count}", String(uploaded)), "ok");
     } else if (failed > 0) {
       this._setStatus(t("fsUploaded").replace("{count}", String(uploaded)), "error");
     }
   }
 
-  _uploadOne(file, targetDir) {
+  _uploadOne(item, targetDir) {
     return new Promise((resolve) => {
+      const token = this._newOpToken();
+      const relDir = item.rel ? item.rel.split("/").slice(0, -1).join("/") : "";
+      const params = new URLSearchParams({ path: targetDir });
+      if (relDir) {
+        params.set("relpath", relDir);
+      }
+      params.set("token", token);
       const form = new FormData();
-      form.append("file", file);
+      form.append("file", item.file);
       const xhr = new XMLHttpRequest();
-      xhr.open(
-        "POST",
-        `/api/hosts/${this.host.id}/fs/upload?path=${encodeURIComponent(targetDir)}`,
-      );
+      xhr.open("POST", `/api/hosts/${this.host.id}/fs/upload?${params.toString()}`);
       xhr.responseType = "json";
+      this._beginOp(() => xhr.abort(), token);
       xhr.upload.addEventListener("progress", (event) => {
         if (event.lengthComputable) {
           const percent = Math.round((event.loaded / event.total) * 100);
-          this._setStatus(`${t("fsUploading").replace("{name}", file.name)} ${percent}%`);
+          this._setStatus(`${t("fsUploading").replace("{name}", item.rel)} ${percent}%`);
         }
       });
       xhr.addEventListener("load", () => {
+        this._endOp();
         const payload = xhr.response || {};
         if (xhr.status >= 400 || payload.error) {
-          this._setStatus(`${t("fsUploadError")} ${file.name}: ${payload.error || `HTTP ${xhr.status}`}`, "error");
+          this._setStatus(
+            `${t("fsUploadError")} ${item.rel}: ${payload.error || `HTTP ${xhr.status}`}`,
+            "error",
+          );
           resolve(false);
           return;
         }
         this._setStatus("");
         resolve(true);
       });
+      xhr.addEventListener("abort", () => {
+        this._endOp();
+        this._setStatus(t("fsCancelled"), "");
+        resolve("cancelled");
+      });
       xhr.addEventListener("error", () => {
-        this._setStatus(`${t("fsUploadError")} ${file.name}`, "error");
+        this._endOp();
+        this._setStatus(`${t("fsUploadError")} ${item.rel}`, "error");
         resolve(false);
       });
       xhr.send(form);
@@ -610,7 +792,8 @@ class FileManagerWindow extends BaseWindow {
       }
       const path = row.dataset.fsPath;
       const paths = this._selected.has(path) ? this._selectedPaths() : [path];
-      event.dataTransfer.setData(FS_DRAG_MIME, JSON.stringify({ hostId: this.host.id, paths }));
+      activeFsDrag = { hostId: this.host.id, paths };
+      event.dataTransfer.setData(FS_DRAG_MIME, JSON.stringify(activeFsDrag));
       event.dataTransfer.effectAllowed = "copyMove";
       try {
         event.dataTransfer.setDragImage(row, 24, 24);
@@ -619,50 +802,69 @@ class FileManagerWindow extends BaseWindow {
       }
     });
 
-    this.listEl.addEventListener("dragend", () => this._setDropRow(null));
+    this.listEl.addEventListener("dragend", () => {
+      activeFsDrag = null;
+      this._setDropRow(null);
+      this.listEl.classList.remove("fs-drop-bg");
+    });
 
     this.listEl.addEventListener("dragover", (event) => {
-      const payload = this._dragPayload(event);
-      const row = event.target.closest(".fs-row[data-fs-index]");
-      const isExternal =
-        !payload && event.dataTransfer && Array.from(event.dataTransfer.types || []).includes("Files");
-      if (!payload && !isExternal) {
+      if (!event.dataTransfer) {
         return;
       }
+      const types = Array.from(event.dataTransfer.types || []);
+      const isInternal = activeFsDrag !== null || types.includes(FS_DRAG_MIME);
+      const isExternal = types.includes("Files");
+      if (!isInternal && !isExternal) {
+        return;
+      }
+      const row = event.target.closest(".fs-row[data-fs-index]");
+      const overDir = row !== null && row.dataset.fsType === "dir";
       if (row) {
-        if (row.dataset.fsType !== "dir") {
+        if (isInternal && row.dataset.fsType !== "dir") {
           return;
         }
-        if (payload && this._selected.has(row.dataset.fsPath)) {
+        if (activeFsDrag && activeFsDrag.paths.includes(row.dataset.fsPath)) {
           return;
         }
       }
       event.preventDefault();
-      if (event.dataTransfer) {
-        event.dataTransfer.dropEffect = payload && payload.hostId !== this.host.id ? "copy" : "move";
-      }
-      this._setDropRow(row || null);
+      event.dataTransfer.dropEffect =
+        isInternal && activeFsDrag && activeFsDrag.hostId !== this.host.id ? "copy" : isInternal ? "move" : "copy";
+      this._setDropRow(overDir ? row : null);
+      this.listEl.classList.toggle("fs-drop-bg", !overDir);
     });
 
     this.listEl.addEventListener("dragleave", (event) => {
       if (!this.listEl.contains(event.relatedTarget)) {
         this._setDropRow(null);
+        this.listEl.classList.remove("fs-drop-bg");
       }
     });
 
     this.listEl.addEventListener("drop", (event) => {
       event.preventDefault();
       this._setDropRow(null);
-      const payload = this._dragPayload(event);
-      if (payload) {
-        this._handleFsDrop(event, payload);
+      this.listEl.classList.remove("fs-drop-bg");
+      const payload = this._dragPayload(event) || activeFsDrag;
+      if (payload && Array.isArray(payload.paths) && payload.paths.length > 0) {
+        const row = event.target.closest(".fs-row[data-fs-index]");
+        const targetDir = row && row.dataset.fsType === "dir" ? row.dataset.fsPath : this.cwd;
+        if (payload.hostId === this.host.id && !row) {
+          return;
+        }
+        this._handleFsDrop(payload, targetDir);
         return;
       }
-      const files = event.dataTransfer ? Array.from(event.dataTransfer.files || []) : [];
-      if (files.length > 0) {
+      const dataTransfer = event.dataTransfer;
+      if (dataTransfer && (dataTransfer.files.length > 0 || Array.from(dataTransfer.items || []).some((item) => item.kind === "file"))) {
         const row = event.target.closest(".fs-row[data-fs-index]");
         const target = row && row.dataset.fsType === "dir" ? row.dataset.fsPath : this.cwd;
-        this._uploadTo(files, target);
+        collectDropEntries(dataTransfer).then((uploads) => {
+          if (uploads) {
+            this._uploadTo(uploads, target);
+          }
+        });
       }
     });
   }
@@ -691,36 +893,37 @@ class FileManagerWindow extends BaseWindow {
     }
   }
 
-  async _handleFsDrop(event, payload) {
+  async _handleFsDrop(payload, targetDir) {
     if (!payload || !Array.isArray(payload.paths) || payload.paths.length === 0) {
       return;
     }
-    const row = event.target.closest(".fs-row[data-fs-index]");
-    const targetDir = row && row.dataset.fsType === "dir" ? row.dataset.fsPath : this.cwd;
     if (payload.hostId === this.host.id && payload.paths.includes(targetDir)) {
       return;
     }
     const move = payload.hostId === this.host.id;
+    const token = this._newOpToken();
+    const controller = new AbortController();
     this._setStatus(move ? t("fsMoving") : t("fsCopying"));
+    this._beginOp(() => controller.abort(), token, payload.hostId);
+    if (!move) {
+      this._pollCopyProgress(token, payload.hostId);
+    }
     try {
       const result = await api(`/api/hosts/${payload.hostId}/fs/copy`, {
         method: "POST",
+        signal: controller.signal,
         body: JSON.stringify({
           paths: payload.paths,
           target_host_id: this.host.id,
           target_dir: targetDir,
           move,
+          token,
         }),
       });
+      this._endOp();
       if (result.error) {
         throw new Error(result.error);
       }
-      this._setStatus(
-        move
-          ? t("fsMoved").replace("{count}", String(payload.paths.length))
-          : t("fsCopied").replace("{count}", String(payload.paths.length)),
-        "ok",
-      );
       await this.reload();
       if (move && payload.hostId !== this.host.id) {
         const source = WindowManager.get(`files-${payload.hostId}`);
@@ -728,7 +931,27 @@ class FileManagerWindow extends BaseWindow {
           source.reload();
         }
       }
+      const errors = Array.isArray(result.errors) ? result.errors : [];
+      if (errors.length > 0) {
+        const first = errors[0];
+        const detail = first && first.error ? first.error : String(first);
+        const more = errors.length > 1 ? ` (+${errors.length - 1} ${t("fsErrorsMore")})` : "";
+        this._setStatus(`${move ? t("fsMoveError") : t("fsCopyError")} ${detail}${more}`, "error");
+        return;
+      }
+      this._setStatus(
+        move
+          ? `${t("fsMoved").replace("{count}", String(payload.paths.length))} → ${targetDir}`
+          : `${t("fsCopied").replace("{count}", String(result.copied ?? payload.paths.length))} → ${targetDir}`,
+        "ok",
+      );
     } catch (error) {
+      this._endOp();
+      if (error && error.name === "AbortError") {
+        await this.reload();
+        this._setStatus(t("fsCancelled"), "");
+        return;
+      }
       this._setStatus(`${move ? t("fsMoveError") : t("fsCopyError")} ${String(error)}`, "error");
     }
   }

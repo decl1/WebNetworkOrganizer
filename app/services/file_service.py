@@ -8,6 +8,7 @@ import base64
 import posixpath
 import shlex
 import stat as statmod
+import threading
 import time
 from typing import Any, Iterator
 
@@ -16,6 +17,94 @@ from . import ssh_service
 READ_LIMIT = 512 * 1024
 CHUNK = 256 * 1024
 SAFE_COPY_DEPTH = 64
+
+_cancel_events: dict[str, threading.Event] = {}
+_cancel_lock = threading.Lock()
+
+
+def register_cancel(token: str) -> threading.Event | None:
+    """Create a cancellation event for a long operation; returns None for empty tokens."""
+    if not token:
+        return None
+    event = threading.Event()
+    with _cancel_lock:
+        _cancel_events[token] = event
+    return event
+
+
+def cancel_op(token: str) -> None:
+    """Signal cancellation for a registered operation token."""
+    if not token:
+        return
+    with _cancel_lock:
+        event = _cancel_events.get(token)
+    if event is not None:
+        event.set()
+
+
+def unregister_cancel(token: str) -> None:
+    """Drop the cancellation event after an operation finishes."""
+    if token:
+        with _cancel_lock:
+            _cancel_events.pop(token, None)
+
+
+def _check_cancel(cancel: threading.Event | None) -> None:
+    if cancel is not None and cancel.is_set():
+        raise FsError("Operation cancelled")
+
+
+_progress_state: dict[str, dict[str, Any]] = {}
+_progress_lock = threading.Lock()
+
+
+def register_progress(token: str) -> dict[str, Any] | None:
+    """Create a progress state for a long-running copy; None for empty tokens."""
+    if not token:
+        return None
+    state: dict[str, Any] = {
+        "total_bytes": 0,
+        "done_bytes": 0,
+        "current": "",
+        "errors": [],
+    }
+    with _progress_lock:
+        _progress_state[token] = state
+    return state
+
+
+def unregister_progress(token: str) -> None:
+    if token:
+        with _progress_lock:
+            _progress_state.pop(token, None)
+
+
+def get_progress(token: str) -> dict[str, Any] | None:
+    """Snapshot of a copy progress state; percent is derived from the bytes."""
+    if not token:
+        return None
+    with _progress_lock:
+        state = _progress_state.get(token)
+        if state is None:
+            return None
+        snapshot = dict(state)
+        snapshot["errors"] = list(state["errors"])
+        if snapshot["total_bytes"] > 0:
+            snapshot["percent"] = min(100, int(snapshot["done_bytes"] * 100 / snapshot["total_bytes"]))
+        else:
+            snapshot["percent"] = None
+        return snapshot
+
+
+def _bump_progress(progress: dict[str, Any] | None, count: int) -> None:
+    """Advance the transferred-byte counter (single writer: the copy thread)."""
+    if progress is not None:
+        progress["done_bytes"] = progress.get("done_bytes", 0) + count
+
+
+def _record_copy_error(errors: list[dict[str, str]] | None, path: str, message: str) -> None:
+    if errors is not None:
+        errors.append({"path": path, "error": message})
 
 
 class FsError(Exception):
@@ -291,24 +380,57 @@ def upload_file(
     raw_path: str,
     filename: str,
     handle: Any,
+    rel_path: str = "",
+    cancel: threading.Event | None = None,
 ) -> dict:
-    """Upload a file into a directory, streaming from ``handle`` in chunks."""
+    """Upload a file into a directory, streaming from ``handle`` in chunks.
+
+    ``rel_path`` is an optional relative directory path (e.g. ``photos/2024``):
+    the folders are created on the host and the file is written inside them
+    under its own filename.
+    """
     path = resolve_path(host, raw_path)
-    safe_name = posixpath.basename((filename or "").replace("\\", "/")) or "upload"
-    target = posixpath.join(path, safe_name)
+    rel = (rel_path or "").replace("\\", "/").strip("/")
+    parts = [p for p in rel.split("/") if p] if rel else []
+    if any(p in (".", "..") for p in parts):
+        raise FsError(f"Invalid upload path: {rel_path!r}")
+    safe_name = posixpath.basename((filename or "").replace("\\", "/"))
+    if not safe_name or safe_name in (".", ".."):
+        raise FsError(f"Invalid upload name: {filename!r}")
+    if parts:
+        sub_dir = posixpath.join(path, *parts)
+        target = posixpath.join(sub_dir, safe_name)
+    else:
+        sub_dir = path
+        target = posixpath.join(path, safe_name)
     client = None
     sftp = None
+    partial_written = False
     try:
         client, sftp = ssh_service.open_sftp(host)
+        if parts:
+            mkdir_cmd = f"mkdir -p {shlex.quote(sub_dir)}"
+            ok, _, last_err = _run_shell_success(host, mkdir_cmd, f"sudo {mkdir_cmd}", timeout=30)
+            if not ok:
+                raise FsError(f"Access denied: {sub_dir} ({last_err.strip()})") from None
         try:
             with sftp.open(target, "wb") as remote:
                 while True:
+                    _check_cancel(cancel)
                     chunk = handle.read(CHUNK)
                     if not chunk:
                         break
                     remote.write(chunk)
+                    partial_written = True
         except FileNotFoundError:
             raise FsError(f"Path not found: {path}") from None
+        except FsError:
+            if partial_written:
+                try:
+                    sftp.remove(target)
+                except Exception:
+                    pass
+            raise
         except Exception as exc:
             _shell_place(host, _read_all(handle), target, exc)
     finally:
@@ -348,6 +470,10 @@ def download_file(host: dict[str, Any], raw_path: str) -> tuple[str, int | None,
         remote = None
     if remote is not None:
         try:
+            remote.prefetch()
+        except Exception:
+            pass
+        try:
             size = int(sftp.stat(path).st_size)
         except Exception:
             size = None
@@ -383,7 +509,7 @@ def _shell_download_chunks(host: dict[str, Any], path: str, size: int) -> Iterat
     offset = 0
     while offset < size:
         count = min(CHUNK, size - offset)
-        cmd = f"dd if={quoted} bs=1 skip={offset} count={count} status=none | base64 -w0"
+        cmd = f"tail -c +{offset + 1} {quoted} | head -c {count} | base64 -w0"
         ok, out, last_err = _run_shell_success(host, cmd, f"sudo {cmd}", timeout=60)
         if not ok:
             raise _shell_error(path, last_err) from None
@@ -556,7 +682,24 @@ def _ensure_dir(host: dict[str, Any], path: str) -> None:
     cmd = f"mkdir -p {shlex.quote(path)}"
     ok, _, last_err = _run_shell_success(host, cmd, f"sudo {cmd}", timeout=30)
     if not ok:
-        raise FsError(f"Cannot create the folder: {path} ({last_err.strip()})") from None
+        err = last_err.strip()
+        if any(key in err.lower() for key in ("password", "пароль")):
+            err = f"{err} (the host's sudo password is missing or wrong)"
+        raise FsError(f"Cannot create the folder: {path} ({err})") from None
+
+
+class _ProgressReader:
+    """Read adapter reporting consumed bytes into a copy progress state."""
+
+    def __init__(self, handle: Any, on_bytes):
+        self._handle = handle
+        self._on_bytes = on_bytes
+
+    def read(self, size: int) -> bytes:
+        chunk = self._handle.read(size)
+        if chunk:
+            self._on_bytes(len(chunk))
+        return chunk
 
 
 class _StreamReader:
@@ -585,8 +728,15 @@ def copy_paths(
     raw_paths: list[str],
     raw_target_dir: str,
     move: bool,
-) -> int:
-    """Copy or move entries to another folder or another host; returns the entry count."""
+    cancel: threading.Event | None = None,
+    token: str = "",
+) -> dict[str, Any]:
+    """Copy or move entries to another folder or another host.
+
+    Returns ``{"items", "copied", "errors"}``; failures of individual entries
+    are collected in ``errors`` and do not abort the remaining entries.
+    Cancellation still aborts the whole operation.
+    """
     src_paths = [resolve_path(src_host, raw) for raw in raw_paths or [] if raw]
     if not src_paths:
         raise FsError("No paths selected")
@@ -596,22 +746,80 @@ def copy_paths(
             raise FsError("Cannot move or copy the root directory")
         if path == target or target.startswith(path.rstrip("/") + "/"):
             raise FsError(f"Cannot copy or move a folder into itself: {path}")
-    same_host = src_host.get("id") == dst_host.get("id")
-    if same_host:
-        for path in src_paths:
-            _shell_copy_entry(src_host, path, target, move)
-    else:
-        visited: set[str] = set()
-        for path in src_paths:
-            _copy_entry_recursive(src_host, dst_host, path, target, visited, 0)
-        if move:
-            delete_paths(src_host, src_paths)
-    return len(src_paths)
+    progress = register_progress(token)
+    tag = "".join(ch for ch in token if ch.isalnum())[:24] or "cp"
+    errors = progress["errors"] if progress is not None else []
+    try:
+        same_host = src_host.get("id") == dst_host.get("id")
+        if same_host:
+            for path in src_paths:
+                _check_cancel(cancel)
+                try:
+                    _shell_copy_entry(src_host, path, target, move, progress, cancel, tag)
+                except FsError as exc:
+                    if cancel is not None and cancel.is_set():
+                        raise
+                    _record_copy_error(errors, path, str(exc))
+                except Exception as exc:
+                    _record_copy_error(errors, path, str(exc))
+        else:
+            if progress is not None:
+                total = _du_total(src_host, src_paths)
+                progress["total_bytes"] = total if total is not None else 0
+            visited: set[str] = set()
+            for path in src_paths:
+                _copy_entry_recursive(src_host, dst_host, path, target, visited, 0, cancel, progress, errors)
+            if move:
+                if errors:
+                    _record_copy_error(
+                        errors, "cleanup", "Source was not deleted because some entries failed to copy"
+                    )
+                else:
+                    delete_paths(src_host, src_paths)
+    finally:
+        unregister_progress(token)
+    copied = 0
+    for path in src_paths:
+        if not any(
+            err["path"] == path or err["path"].startswith(path.rstrip("/") + "/") for err in errors
+        ):
+            copied += 1
+    return {"items": len(src_paths), "copied": copied, "errors": errors}
 
 
-def _shell_copy_entry(host: dict[str, Any], src: str, dst_dir: str, move: bool) -> None:
+def _du_total(host: dict[str, Any], paths: list[str]) -> int | None:
+    """Total byte size of the existing paths via ``du -sb``; None when unknown.
+
+    Paths that do not exist (or cannot be measured) are skipped: they fail
+    during the transfer anyway and are reported as copy errors.
+    """
+    total = 0
+    measured = 0
+    for path in paths:
+        cmd = f"du -sb -- {shlex.quote(path)}"
+        ok, out, _last_err = _run_shell_success(host, cmd, f"sudo {cmd}", timeout=60)
+        if not ok:
+            continue
+        try:
+            total += int(out.split()[0])
+        except (ValueError, IndexError):
+            continue
+        measured += 1
+    return total if measured else None
+
+
+def _shell_copy_entry(
+    host: dict[str, Any],
+    src: str,
+    dst_dir: str,
+    move: bool,
+    progress: dict[str, Any] | None = None,
+    cancel: threading.Event | None = None,
+    tag: str = "",
+) -> None:
     """Move or copy one entry on the same host (a directory landing on an existing
-    folder nests into it, like a file explorer would)."""
+    folder nests into it, like a file explorer would). Big copies run in the
+    background and report byte progress."""
     dst = posixpath.join(dst_dir, posixpath.basename(src))
     if _path_kind(host, dst) == "dir":
         dst = posixpath.join(dst, posixpath.basename(src))
@@ -622,16 +830,123 @@ def _shell_copy_entry(host: dict[str, Any], src: str, dst_dir: str, move: bool) 
         ok, _, last_err = _run_shell_success(host, cmd, f"sudo {cmd}", timeout=60)
         if ok:
             return
-        copy_cmd = f"cp -a -- {shlex.quote(src)} {shlex.quote(dst)}"
-        ok, _, last_err = _run_shell_success(host, copy_cmd, f"sudo {copy_cmd}", timeout=600)
-        if not ok:
-            raise FsError(f"Move failed: {(last_err or 'error').strip()}") from None
+        copy_with_progress(host, src, dst, cancel, progress, tag)
         delete_paths(host, [src])
         return
-    copy_cmd = f"cp -a -- {shlex.quote(src)} {shlex.quote(dst)}"
-    ok, _, last_err = _run_shell_success(host, copy_cmd, f"sudo {copy_cmd}", timeout=600)
-    if not ok:
-        raise FsError(f"Copy failed: {(last_err or 'error').strip()}") from None
+    copy_with_progress(host, src, dst, cancel, progress, tag)
+
+
+def copy_with_progress(
+    host: dict[str, Any],
+    src: str,
+    dst: str,
+    cancel: threading.Event | None,
+    progress: dict[str, Any] | None,
+    tag: str,
+) -> None:
+    """Copy ``src`` to ``dst`` on the same host; small copies run synchronously,
+    large ones in the background so progress can be polled and the copy cancelled."""
+    qsrc = shlex.quote(src)
+    qdst = shlex.quote(dst)
+    total = 0
+    if progress is not None:
+        ok, out, _last_err = _run_shell_success(host, f"du -sb -- {qsrc}", f"sudo du -sb -- {qsrc}", timeout=60)
+        if ok:
+            try:
+                total = int(out.split()[0])
+            except (ValueError, IndexError):
+                total = 0
+        if progress is not None:
+            progress["total_bytes"] = total
+    if total <= 0 or total < 8 * 1024 * 1024:
+        plain = f"cp -a -- {qsrc} {qdst}"
+        ok, _out, last_err = _run_shell_success(host, plain, f"sudo {plain}", timeout=600)
+        if not ok:
+            raise FsError(f"Copy failed: {(last_err or 'error').strip()}") from None
+        return
+    attempts = ssh_service.command_attempts(
+        f"sudo cp -a -- {qsrc} {qdst}", str(host.get("sudo_password") or "")
+    )
+    last_err = ""
+    for label, variant in attempts:
+        if progress is not None:
+            progress["current"] = src
+        rc_file = f"/tmp/wno_cp_{tag}_{label}.rc"
+        log_file = f"/tmp/wno_cp_{tag}_{label}.log"
+        pid = _start_background_copy(host, variant, rc_file, log_file)
+        while _pid_alive(host, pid):
+            if cancel is not None and cancel.is_set():
+                _kill_copy_tree(host, pid)
+                _cleanup_partial_copy(host, dst, rc_file, log_file)
+                raise FsError("Operation cancelled")
+            _refresh_copy_progress(host, dst, total, progress)
+            time.sleep(0.5)
+        rc = _copy_rc(host, rc_file)
+        if rc is None:
+            time.sleep(0.4)
+            rc = _copy_rc(host, rc_file)
+        if rc == 0:
+            return
+        last_err = _copy_log(host, log_file) or (
+            f"cp exited with {rc}" if rc is not None else "cp did not finish"
+        )
+    raise FsError(f"Copy failed: {last_err.strip()}") from None
+
+
+def _start_background_copy(host: dict[str, Any], variant: str, rc_file: str, log_file: str) -> str:
+    """Start ``variant`` in a detached session and return its pid ("" on failure)."""
+    inner = f"{variant}; echo $? > {rc_file}"
+    cmd = (
+        f"rm -f {rc_file} {log_file}; "
+        f"setsid sh -c {shlex.quote(inner)} > {log_file} 2>&1 < /dev/null & echo $!"
+    )
+    ok, out, _last_err = _run_shell_success(host, cmd, "", timeout=20)
+    if not ok or not out:
+        return ""
+    pid = out.strip().splitlines()[-1].strip()
+    return pid if pid.isdigit() else ""
+
+
+def _pid_alive(host: dict[str, Any], pid: str) -> bool:
+    if not pid or not pid.isdigit():
+        return False
+    ok, _out, _err = _run_shell_success(host, f"kill -0 {pid} 2>/dev/null", "", timeout=15)
+    return ok
+
+
+def _kill_copy_tree(host: dict[str, Any], pid: str) -> None:
+    if pid and pid.isdigit():
+        _run_shell_success(host, f"pkill -9 -P {pid} 2>/dev/null; kill -9 {pid} 2>/dev/null", "", timeout=15)
+
+
+def _cleanup_partial_copy(host: dict[str, Any], dst: str, rc_file: str, log_file: str) -> None:
+    cmd = f"rm -rf -- {shlex.quote(dst)}; rm -f {rc_file} {log_file}"
+    _run_shell_success(host, cmd, f"sudo {cmd}", timeout=30)
+
+
+def _copy_rc(host: dict[str, Any], rc_file: str) -> int | None:
+    ok, out, _err = _run_shell_success(host, f"cat {rc_file} 2>/dev/null", "", timeout=15)
+    if ok and out.strip().isdigit():
+        return int(out.strip())
+    return None
+
+
+def _copy_log(host: dict[str, Any], log_file: str) -> str:
+    _ok, out, _err = _run_shell_success(host, f"tail -c 2000 {log_file} 2>/dev/null", "", timeout=15)
+    return (out or "").strip()
+
+
+def _refresh_copy_progress(
+    host: dict[str, Any], dst: str, total: int, progress: dict[str, Any] | None
+) -> None:
+    if progress is None or total <= 0:
+        return
+    ok, out, _err = _run_shell_success(host, f"du -sb -- {shlex.quote(dst)}", f"sudo du -sb -- {shlex.quote(dst)}", timeout=30)
+    if ok:
+        try:
+            progress["done_bytes"] = min(int(out.split()[0]), total)
+        except (ValueError, IndexError):
+            pass
 
 
 def _copy_entry_recursive(
@@ -641,24 +956,55 @@ def _copy_entry_recursive(
     dst_dir: str,
     visited: set[str],
     depth: int,
+    cancel: threading.Event | None = None,
+    progress: dict[str, Any] | None = None,
+    errors: list[dict[str, str]] | None = None,
 ) -> None:
-    """Copy a file or an entire folder tree between two different hosts."""
+    """Copy a file or an entire folder tree between two different hosts.
+
+    Failures of individual entries are recorded into ``errors`` and do not
+    abort the remaining entries; cancellation still aborts everything.
+    """
     if depth > SAFE_COPY_DEPTH or src_path in visited:
         return
     visited.add(src_path)
+    _check_cancel(cancel)
     kind = _path_kind(src_host, src_path)
     base = posixpath.basename(src_path)
     if kind == "dir":
         dst = posixpath.join(dst_dir, base)
-        if _path_kind(dst_host, dst) != "dir":
-            _ensure_dir(dst_host, dst)
-        entries = list_dir(src_host, src_path)["entries"]
-        for entry in entries:
-            _copy_entry_recursive(src_host, dst_host, entry["path"], dst, visited, depth + 1)
+        try:
+            if _path_kind(dst_host, dst) != "dir":
+                _ensure_dir(dst_host, dst)
+            entries = list_dir(src_host, src_path)["entries"]
+            for entry in entries:
+                _copy_entry_recursive(src_host, dst_host, entry["path"], dst, visited, depth + 1, cancel, progress, errors)
+        except FsError as exc:
+            if cancel is not None and cancel.is_set():
+                raise
+            _record_copy_error(errors, src_path, str(exc))
+        except Exception as exc:
+            _record_copy_error(errors, src_path, str(exc))
         return
     dest_dir = dst_dir
     probe = posixpath.join(dst_dir, base)
     if _path_kind(dst_host, probe) == "dir":
         dest_dir = probe
-    _resolved, _size, stream = download_file(src_host, src_path)
-    upload_file(dst_host, dest_dir, base, _StreamReader(stream))
+    try:
+        if progress is not None:
+            progress["current"] = src_path
+        _resolved, _size, stream = download_file(src_host, src_path)
+        if progress is not None:
+            handle = _ProgressReader(_StreamReader(stream), lambda count: _bump_progress(progress, count))
+        else:
+            handle = _StreamReader(stream)
+        upload_file(dst_host, dest_dir, base, handle, cancel=cancel)
+    except FsError as exc:
+        if cancel is not None and cancel.is_set():
+            raise
+        _record_copy_error(errors, src_path, str(exc))
+    except Exception as exc:
+        _record_copy_error(errors, src_path, str(exc))
+    finally:
+        if progress is not None:
+            progress["current"] = ""

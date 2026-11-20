@@ -1,13 +1,16 @@
 """Files router: browse, read, write, upload, download and manage files on hosts."""
 
 import json
+import logging
+import time
 
 from fastapi import APIRouter, Body, File, Query, UploadFile
 from fastapi.responses import StreamingResponse
 
-from ..schemas.files import FsCopyIn, FsDeleteIn, FsListOut, FsMkdirIn, FsReadOut, FsRenameIn
+from ..schemas.files import FsCancelIn, FsCopyIn, FsDeleteIn, FsListOut, FsMkdirIn, FsReadOut, FsRenameIn
 from ..services import file_service, hosts_service
 
+logger = logging.getLogger(__name__)
 router = APIRouter(tags=["files"])
 
 _FALLBACK_NAME = "download"
@@ -65,18 +68,24 @@ def fs_upload(
     host_id: int,
     file: UploadFile = File(...),
     path: str = Query(default="~"),
+    relpath: str = Query(default=""),
+    token: str = Query(default=""),
 ) -> dict:
-    """Upload a file (multipart) into a directory on the host."""
+    """Upload a file (multipart) into a directory on the host; ``relpath`` keeps
+    folder structure (e.g. dragging a whole folder from the browser)."""
     host = _get_host(host_id)
     if host is None:
         return {"error": "Host not found"}
     name = file.filename or ""
+    cancel = file_service.register_cancel(token)
     try:
-        result = file_service.upload_file(host, path, name, file.file)
+        result = file_service.upload_file(host, path, name, file.file, relpath, cancel)
     except file_service.FsError as exc:
         return {"error": str(exc)}
     except Exception as exc:
         return {"error": f"Upload failed: {exc}"}
+    finally:
+        file_service.unregister_cancel(token)
     return {"ok": True, "path": result["path"]}
 
 
@@ -150,14 +159,78 @@ def fs_copy(host_id: int, payload: FsCopyIn) -> dict:
     src = _get_host(host_id)
     dst = _get_host(payload.target_host_id)
     if src is None or dst is None:
+        logger.warning("fs/copy src=%s dst=%s: host not found", host_id, payload.target_host_id)
         return {"error": "Host not found"}
+    started = time.monotonic()
+    cancel = file_service.register_cancel(payload.token)
     try:
-        count = file_service.copy_paths(src, dst, payload.paths, payload.target_dir, payload.move)
+        result = file_service.copy_paths(
+            src, dst, payload.paths, payload.target_dir, payload.move, cancel, payload.token
+        )
     except file_service.FsError as exc:
+        logger.warning(
+            "fs/copy src=%s dst=%s paths=%s target=%s move=%s failed: %s (%.2fs)",
+            src.get("id"),
+            dst.get("id"),
+            payload.paths,
+            payload.target_dir,
+            payload.move,
+            exc,
+            time.monotonic() - started,
+        )
         return {"error": str(exc)}
     except Exception as exc:
+        logger.exception(
+            "fs/copy src=%s dst=%s paths=%s target=%s move=%s crashed (%.2fs)",
+            src.get("id"),
+            dst.get("id"),
+            payload.paths,
+            payload.target_dir,
+            payload.move,
+            time.monotonic() - started,
+        )
         return {"error": f"Copy failed: {exc}"}
-    return {"ok": True, "items": count, "moved": payload.move}
+    finally:
+        file_service.unregister_cancel(payload.token)
+        file_service.unregister_progress(payload.token)
+    errors = result["errors"]
+    logger.info(
+        "fs/copy src=%s dst=%s paths=%s target=%s move=%s -> copied=%s/%s errors=%s (%.2fs)",
+        src.get("id"),
+        dst.get("id"),
+        payload.paths,
+        payload.target_dir,
+        payload.move,
+        result["copied"],
+        result["items"],
+        len(errors),
+        time.monotonic() - started,
+    )
+    return {
+        "ok": not errors,
+        "items": result["items"],
+        "copied": result["copied"],
+        "moved": payload.move,
+        "errors": errors,
+    }
+
+
+@router.get("/api/hosts/{host_id}/fs/progress")
+def fs_progress(host_id: int, token: str = Query(default="")) -> dict:
+    """Live progress snapshot of a copy operation; used by the UI status bar."""
+    if _get_host(host_id) is None:
+        return {"error": "Host not found"}
+    state = file_service.get_progress(token)
+    if state is None:
+        return {"error": "No operation with this token"}
+    return state
+
+
+@router.post("/api/hosts/{host_id}/fs/cancel")
+def fs_cancel(host_id: int, payload: FsCancelIn) -> dict:
+    """Abort a running upload/copy operation by its client-generated token."""
+    file_service.cancel_op(payload.token)
+    return {"ok": True, "cancelled": True}
 
 
 @router.get("/api/hosts/{host_id}/fs/zip")

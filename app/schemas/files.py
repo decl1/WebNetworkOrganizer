@@ -46,3 +46,8 @@ class FsCopyIn(BaseModel):
     target_host_id: int
     target_dir: str = "~"
     move: bool = False
+    token: str = ""
+
+
+class FsCancelIn(BaseModel):
+    token: str = ""
