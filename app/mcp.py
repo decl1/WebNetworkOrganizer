@@ -9,11 +9,15 @@ import json
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 
 from .services import hosts_service
 from .services.snapshot import load_snapshot, public_host
 
-mcp = FastMCP("WebNetworkOrganizer")
+mcp = FastMCP(
+    "WebNetworkOrganizer",
+    transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False),
+)
 
 
 def _flatten_hosts(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
